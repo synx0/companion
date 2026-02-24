@@ -20,8 +20,9 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  // Styled loading state while checking session
-  if (session.isPending) {
+  // Styled loading state while checking session.
+  // If there's an error (e.g. auth server not configured), treat as unauthenticated.
+  if (session.isPending && !session.error) {
     return (
       <div className="h-screen bg-cc-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -34,7 +35,7 @@ export default function App() {
     );
   }
 
-  // Unauthenticated → landing page
+  // Unauthenticated or auth error → landing page
   if (!session.data) {
     return <Landing />;
   }
