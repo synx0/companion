@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serveStatic } from "hono/bun";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,8 +29,10 @@ app.get("/api/status", (c) => {
   });
 });
 
-// ── Static files (production) ────────────────────────────────────────────────
+// ── Static files (production only, Bun runtime) ─────────────────────────────
+// Dynamic import avoids "Bun is not defined" when running under Node/vitest.
 if (process.env.NODE_ENV === "production") {
+  const { serveStatic } = await import("hono/bun");
   const distDir = resolve(__dirname, "../dist");
   app.use("/*", serveStatic({ root: distDir }));
   app.get("/*", serveStatic({ path: resolve(distDir, "index.html") }));
