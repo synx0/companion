@@ -208,6 +208,22 @@ describe("createAgent", () => {
     );
     expect(agent.triggers!.webhook!.secret).toBe(customSecret);
   });
+
+  it("auto-generates linear and github secrets when missing", () => {
+    const agent = agentStore.createAgent(
+      makeAgentInput({
+        name: "Integration Trigger Agent",
+        triggers: {
+          linear: { enabled: true },
+          github: { enabled: true, events: ["pull_request"] },
+        },
+      }),
+    );
+    expect(agent.triggers?.linear?.secret).toBeDefined();
+    expect(agent.triggers?.linear?.secret).toHaveLength(48);
+    expect(agent.triggers?.github?.secret).toBeDefined();
+    expect(agent.triggers?.github?.secret).toHaveLength(48);
+  });
 });
 
 // ===========================================================================
