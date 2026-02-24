@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api, type AgentInfo, type AgentExport, type AgentExecution, type McpServerConfigAgent } from "../api.js";
+import { api, type AgentInfo, type AgentExport, type AgentExecution, type McpServerConfigAgent, type CompanionEnv } from "../api.js";
 import { getModelsForBackend, getDefaultModel, getModesForBackend, getDefaultMode } from "../utils/backends.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { timeAgo } from "../utils/time-ago.js";
@@ -9,6 +9,14 @@ import type { Route } from "../utils/routing.js";
 
 interface Props {
   route: Route;
+}
+
+interface McpServerFormEntry {
+  type: "stdio" | "sse" | "http";
+  command: string;
+  args: string;
+  url: string;
+  env: string;
 }
 
 interface AgentFormData {
@@ -22,6 +30,25 @@ interface AgentFormData {
   useTempDir: boolean;
   prompt: string;
   envSlug: string;
+  // Environment variables (key-value pairs)
+  env: { key: string; value: string }[];
+  // Codex internet access
+  codexInternetAccess: boolean;
+  // Git
+  branch: string;
+  createBranch: boolean;
+  useWorktree: boolean;
+  // MCP Servers
+  mcpServers: Record<string, McpServerConfigAgent>;
+  // Skills
+  skills: string[];
+  // Docker/Container
+  containerImage: string;
+  containerPorts: string;
+  containerVolumes: string;
+  containerInitScript: string;
+  // Allowed tools
+  allowedTools: string[];
   // Triggers
   webhookEnabled: boolean;
   scheduleEnabled: boolean;
@@ -40,6 +67,18 @@ const EMPTY_FORM: AgentFormData = {
   useTempDir: false,
   prompt: "",
   envSlug: "",
+  env: [],
+  codexInternetAccess: false,
+  branch: "",
+  createBranch: false,
+  useWorktree: false,
+  mcpServers: {},
+  skills: [],
+  containerImage: "",
+  containerPorts: "",
+  containerVolumes: "",
+  containerInitScript: "",
+  allowedTools: [],
   webhookEnabled: false,
   scheduleEnabled: false,
   scheduleExpression: "0 8 * * *",
@@ -92,6 +131,16 @@ function humanizeSchedule(expression: string, recurring: boolean): string {
 function getWebhookUrl(agent: AgentInfo): string {
   const base = window.location.origin;
   return `${base}/api/agents/${encodeURIComponent(agent.id)}/webhook/${agent.triggers?.webhook?.secret || ""}`;
+}
+
+/** Count how many advanced features are configured */
+function countAdvancedFeatures(form: AgentFormData): number {
+  let count = 0;
+  if (Object.keys(form.mcpServers).length > 0) count++;
+  if (form.skills.length > 0) count++;
+  if (form.containerImage) count++;
+  if (form.allowedTools.length > 0) count++;
+  return count;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -157,6 +206,20 @@ export function AgentsPage({ route }: Props) {
       useTempDir: agent.cwd === "temp" || !agent.cwd,
       prompt: agent.prompt,
       envSlug: agent.envSlug || "",
+      env: agent.env
+        ? Object.entries(agent.env).map(([key, value]) => ({ key, value }))
+        : [],
+      codexInternetAccess: agent.codexInternetAccess ?? false,
+      branch: agent.branch || "",
+      createBranch: agent.createBranch ?? false,
+      useWorktree: agent.useWorktree ?? false,
+      mcpServers: agent.mcpServers || {},
+      skills: agent.skills || [],
+      containerImage: agent.container?.image || "",
+      containerPorts: (agent.container?.ports || []).join(", "),
+      containerVolumes: (agent.container?.volumes || []).join("\n"),
+      containerInitScript: agent.container?.initScript || "",
+      allowedTools: agent.allowedTools || [],
       webhookEnabled: agent.triggers?.webhook?.enabled ?? false,
       scheduleEnabled: agent.triggers?.schedule?.enabled ?? false,
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
@@ -177,6 +240,26 @@ export function AgentsPage({ route }: Props) {
     setSaving(true);
     setError("");
     try {
+      // Build env record from key-value pairs, omitting empty keys
+      const envRecord: Record<string, string> = {};
+      for (const { key, value } of form.env) {
+        if (key.trim()) envRecord[key.trim()] = value;
+      }
+
+      // Build container config, only include if image is set
+      const container = form.containerImage
+        ? {
+            image: form.containerImage,
+            ports: form.containerPorts
+              ? form.containerPorts.split(",").map((p) => parseInt(p.trim(), 10)).filter((n) => !isNaN(n))
+              : undefined,
+            volumes: form.containerVolumes
+              ? form.containerVolumes.split("\n").map((v) => v.trim()).filter(Boolean)
+              : undefined,
+            initScript: form.containerInitScript || undefined,
+          }
+        : undefined;
+
       const data: Partial<AgentInfo> = {
         version: 1,
         name: form.name,
@@ -188,6 +271,15 @@ export function AgentsPage({ route }: Props) {
         cwd: form.useTempDir ? "temp" : form.cwd,
         prompt: form.prompt,
         envSlug: form.envSlug || undefined,
+        env: Object.keys(envRecord).length > 0 ? envRecord : undefined,
+        codexInternetAccess: form.backendType === "codex" ? form.codexInternetAccess : undefined,
+        branch: form.branch || undefined,
+        createBranch: form.branch ? form.createBranch : undefined,
+        useWorktree: form.branch ? form.useWorktree : undefined,
+        mcpServers: Object.keys(form.mcpServers).length > 0 ? form.mcpServers : undefined,
+        skills: form.skills.length > 0 ? form.skills : undefined,
+        container,
+        allowedTools: form.allowedTools.length > 0 ? form.allowedTools : undefined,
         enabled: true,
         triggers: {
           webhook: { enabled: form.webhookEnabled, secret: "" },
@@ -578,6 +670,25 @@ function AgentEditor({
   const models = getModelsForBackend(form.backendType);
   const modes = getModesForBackend(form.backendType);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(() => countAdvancedFeatures(form) > 0);
+  const [showMcpForm, setShowMcpForm] = useState(false);
+  const [mcpFormName, setMcpFormName] = useState("");
+  const [mcpFormData, setMcpFormData] = useState<McpServerFormEntry>({
+    type: "stdio",
+    command: "",
+    args: "",
+    url: "",
+    env: "",
+  });
+  const [availableSkills, setAvailableSkills] = useState<{ slug: string; name: string; description: string }[]>([]);
+  const [envProfiles, setEnvProfiles] = useState<CompanionEnv[]>([]);
+  const [allowedToolInput, setAllowedToolInput] = useState("");
+
+  // Fetch skills and env profiles on mount
+  useEffect(() => {
+    api.listSkills().then(setAvailableSkills).catch(() => {});
+    api.listEnvs().then(setEnvProfiles).catch(() => {});
+  }, []);
 
   function updateField<K extends keyof AgentFormData>(key: K, value: AgentFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -590,6 +701,77 @@ function AgentEditor({
       model: getDefaultModel(backend),
       permissionMode: getDefaultMode(backend),
     }));
+  }
+
+  // ── Env vars helpers ──
+  function addEnvVar() {
+    setForm((prev) => ({ ...prev, env: [...prev.env, { key: "", value: "" }] }));
+  }
+  function updateEnvVar(index: number, field: "key" | "value", val: string) {
+    setForm((prev) => {
+      const updated = [...prev.env];
+      updated[index] = { ...updated[index], [field]: val };
+      return { ...prev, env: updated };
+    });
+  }
+  function removeEnvVar(index: number) {
+    setForm((prev) => ({ ...prev, env: prev.env.filter((_, i) => i !== index) }));
+  }
+
+  // ── MCP server helpers ──
+  function addMcpServer() {
+    if (!mcpFormName.trim()) return;
+    const entry: McpServerConfigAgent = { type: mcpFormData.type };
+    if (mcpFormData.type === "stdio") {
+      entry.command = mcpFormData.command;
+      entry.args = mcpFormData.args ? mcpFormData.args.split(" ").filter(Boolean) : undefined;
+    } else {
+      entry.url = mcpFormData.url;
+    }
+    if (mcpFormData.env.trim()) {
+      try {
+        entry.env = JSON.parse(mcpFormData.env);
+      } catch { /* ignore parse errors */ }
+    }
+    setForm((prev) => ({
+      ...prev,
+      mcpServers: { ...prev.mcpServers, [mcpFormName.trim()]: entry },
+    }));
+    setMcpFormName("");
+    setMcpFormData({ type: "stdio", command: "", args: "", url: "", env: "" });
+    setShowMcpForm(false);
+  }
+  function removeMcpServer(name: string) {
+    setForm((prev) => {
+      const updated = { ...prev.mcpServers };
+      delete updated[name];
+      return { ...prev, mcpServers: updated };
+    });
+  }
+
+  // ── Skills toggle ──
+  function toggleSkill(slug: string) {
+    setForm((prev) => ({
+      ...prev,
+      skills: prev.skills.includes(slug)
+        ? prev.skills.filter((s) => s !== slug)
+        : [...prev.skills, slug],
+    }));
+  }
+
+  // ── Allowed tools helpers ──
+  function addAllowedTool(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && allowedToolInput.trim()) {
+      e.preventDefault();
+      const tool = allowedToolInput.trim();
+      if (!form.allowedTools.includes(tool)) {
+        updateField("allowedTools", [...form.allowedTools, tool]);
+      }
+      setAllowedToolInput("");
+    }
+  }
+  function removeAllowedTool(tool: string) {
+    updateField("allowedTools", form.allowedTools.filter((t) => t !== tool));
   }
 
   return (
@@ -733,6 +915,18 @@ function AgentEditor({
                 </select>
               </div>
             </div>
+            {/* Codex internet access toggle */}
+            {form.backendType === "codex" && (
+              <label className="flex items-center gap-2 text-sm text-cc-fg cursor-pointer mt-3">
+                <input
+                  type="checkbox"
+                  checked={form.codexInternetAccess}
+                  onChange={(e) => updateField("codexInternetAccess", e.target.checked)}
+                  className="rounded"
+                />
+                Allow internet access
+              </label>
+            )}
           </section>
 
           {/* ── Working Directory ── */}
@@ -774,6 +968,351 @@ function AgentEditor({
                 }}
                 onClose={() => setShowFolderPicker(false)}
               />
+            )}
+          </section>
+
+          {/* ── Environment ── */}
+          <section>
+            <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider mb-3">Environment</h2>
+            <div className="space-y-3">
+              {/* Env profile dropdown */}
+              <div>
+                <label className="block text-xs text-cc-muted mb-1">Environment Profile</label>
+                <select
+                  value={form.envSlug}
+                  onChange={(e) => updateField("envSlug", e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-sm focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                >
+                  <option value="">None</option>
+                  {envProfiles.map((env) => (
+                    <option key={env.slug} value={env.slug}>{env.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-cc-muted mt-1">
+                  Select a shared environment profile, or add variables below.
+                </p>
+              </div>
+              {/* Inline key-value editor */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-cc-muted">Extra Variables</label>
+                  <button
+                    onClick={addEnvVar}
+                    className="text-[10px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                  >
+                    + Add Variable
+                  </button>
+                </div>
+                {form.env.length === 0 ? (
+                  <p className="text-[10px] text-cc-muted">No extra variables set.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {form.env.map((entry, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <input
+                          value={entry.key}
+                          onChange={(e) => updateEnvVar(i, "key", e.target.value)}
+                          placeholder="KEY"
+                          className="w-1/3 px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                        />
+                        <input
+                          value={entry.value}
+                          onChange={(e) => updateEnvVar(i, "value", e.target.value)}
+                          placeholder="value"
+                          className="flex-1 px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                        />
+                        <button
+                          onClick={() => removeEnvVar(i)}
+                          className="text-cc-muted hover:text-cc-error transition-colors cursor-pointer p-1"
+                          title="Remove variable"
+                        >
+                          <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                            <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* ── Git (only when cwd is set and not using temp dir) ── */}
+          {!form.useTempDir && form.cwd && (
+            <section data-testid="git-section">
+              <h2 className="text-xs font-medium text-cc-muted uppercase tracking-wider mb-3">Git</h2>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-cc-muted mb-1">Branch</label>
+                  <input
+                    value={form.branch}
+                    onChange={(e) => updateField("branch", e.target.value)}
+                    placeholder="e.g., feature/my-branch"
+                    className="w-full px-3 py-2 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-sm font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                  />
+                </div>
+                {form.branch && (
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm text-cc-fg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.createBranch}
+                        onChange={(e) => updateField("createBranch", e.target.checked)}
+                        className="rounded"
+                      />
+                      Create branch if missing
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-cc-fg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.useWorktree}
+                        onChange={(e) => updateField("useWorktree", e.target.checked)}
+                        className="rounded"
+                      />
+                      Use worktree
+                    </label>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ── Advanced (collapsible) ── */}
+          <section>
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center gap-2 text-xs font-medium text-cc-muted uppercase tracking-wider cursor-pointer hover:text-cc-fg transition-colors w-full"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                className={`w-3 h-3 transition-transform ${showAdvanced ? "rotate-90" : ""}`}
+              >
+                <path d="M6 3l5 5-5 5V3z" />
+              </svg>
+              Advanced
+              {countAdvancedFeatures(form) > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-cc-primary/15 text-cc-primary font-normal">
+                  {countAdvancedFeatures(form)}
+                </span>
+              )}
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-4 space-y-6 pl-5 border-l-2 border-cc-border/30">
+                {/* ── MCP Servers ── */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-medium text-cc-muted">MCP Servers</h3>
+                    <button
+                      onClick={() => setShowMcpForm(!showMcpForm)}
+                      className="text-[10px] text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                    >
+                      {showMcpForm ? "Cancel" : "+ Add Server"}
+                    </button>
+                  </div>
+
+                  {/* Existing servers list */}
+                  {Object.keys(form.mcpServers).length === 0 && !showMcpForm && (
+                    <p className="text-[10px] text-cc-muted">No MCP servers configured.</p>
+                  )}
+                  {Object.entries(form.mcpServers).map(([name, config]) => (
+                    <div key={name} className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-cc-hover/50 mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-cc-fg font-mono-code">{name}</span>
+                        <span className="px-1.5 py-0.5 text-[10px] rounded bg-cc-border text-cc-muted">{config.type}</span>
+                      </div>
+                      <button
+                        onClick={() => removeMcpServer(name)}
+                        className="text-cc-muted hover:text-cc-error transition-colors cursor-pointer p-0.5"
+                        title="Remove server"
+                      >
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                          <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Add server form */}
+                  {showMcpForm && (
+                    <div className="rounded-lg border border-cc-border p-3 mt-2 space-y-2">
+                      <div>
+                        <label className="block text-[10px] text-cc-muted mb-0.5">Server Name</label>
+                        <input
+                          value={mcpFormName}
+                          onChange={(e) => setMcpFormName(e.target.value)}
+                          placeholder="e.g., my-server"
+                          className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-cc-muted mb-0.5">Type</label>
+                        <div className="flex rounded-lg border border-cc-border overflow-hidden">
+                          {(["stdio", "sse", "http"] as const).map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setMcpFormData((prev) => ({ ...prev, type: t }))}
+                              className={`flex-1 px-2 py-1 text-[10px] transition-colors cursor-pointer ${mcpFormData.type === t ? "bg-cc-primary text-white" : "bg-cc-input-bg text-cc-muted hover:text-cc-fg"}`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {mcpFormData.type === "stdio" ? (
+                        <>
+                          <div>
+                            <label className="block text-[10px] text-cc-muted mb-0.5">Command</label>
+                            <input
+                              value={mcpFormData.command}
+                              onChange={(e) => setMcpFormData((prev) => ({ ...prev, command: e.target.value }))}
+                              placeholder="e.g., npx -y @some/mcp-server"
+                              className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-cc-muted mb-0.5">Args (space-separated)</label>
+                            <input
+                              value={mcpFormData.args}
+                              onChange={(e) => setMcpFormData((prev) => ({ ...prev, args: e.target.value }))}
+                              placeholder="--port 3000"
+                              className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <div>
+                          <label className="block text-[10px] text-cc-muted mb-0.5">URL</label>
+                          <input
+                            value={mcpFormData.url}
+                            onChange={(e) => setMcpFormData((prev) => ({ ...prev, url: e.target.value }))}
+                            placeholder="https://example.com/mcp"
+                            className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                          />
+                        </div>
+                      )}
+                      <button
+                        onClick={addMcpServer}
+                        disabled={!mcpFormName.trim()}
+                        className="px-3 py-1.5 text-xs rounded-lg bg-cc-primary text-white hover:bg-cc-primary-hover transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        Add Server
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Skills ── */}
+                <div>
+                  <h3 className="text-xs font-medium text-cc-muted mb-2">Skills</h3>
+                  {availableSkills.length === 0 ? (
+                    <p className="text-[10px] text-cc-muted">No skills found in ~/.claude/skills/</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {availableSkills.map((skill) => (
+                        <label
+                          key={skill.slug}
+                          className="flex items-start gap-2 text-sm text-cc-fg cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={form.skills.includes(skill.slug)}
+                            onChange={() => toggleSkill(skill.slug)}
+                            className="rounded mt-0.5"
+                          />
+                          <div>
+                            <span className="text-xs">{skill.name}</span>
+                            {skill.description && (
+                              <p className="text-[10px] text-cc-muted">{skill.description}</p>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Docker Container ── */}
+                <div>
+                  <h3 className="text-xs font-medium text-cc-muted mb-2">Docker Container</h3>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[10px] text-cc-muted mb-0.5">Image</label>
+                      <input
+                        value={form.containerImage}
+                        onChange={(e) => updateField("containerImage", e.target.value)}
+                        placeholder="e.g., the-companion:latest"
+                        className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                      />
+                    </div>
+                    {form.containerImage && (
+                      <>
+                        <div>
+                          <label className="block text-[10px] text-cc-muted mb-0.5">Ports (comma-separated)</label>
+                          <input
+                            value={form.containerPorts}
+                            onChange={(e) => updateField("containerPorts", e.target.value)}
+                            placeholder="3000, 8080"
+                            className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-cc-muted mb-0.5">Volumes (one per line)</label>
+                          <textarea
+                            value={form.containerVolumes}
+                            onChange={(e) => updateField("containerVolumes", e.target.value)}
+                            placeholder="/host/path:/container/path"
+                            className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code resize-none h-16 focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-cc-muted mb-0.5">Init Script</label>
+                          <textarea
+                            value={form.containerInitScript}
+                            onChange={(e) => updateField("containerInitScript", e.target.value)}
+                            placeholder="#!/bin/bash\napt-get update && ..."
+                            className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code resize-none h-20 focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Allowed Tools ── */}
+                <div>
+                  <h3 className="text-xs font-medium text-cc-muted mb-2">Allowed Tools</h3>
+                  <div className="space-y-2">
+                    {form.allowedTools.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {form.allowedTools.map((tool) => (
+                          <span key={tool} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono-code rounded-lg bg-cc-hover text-cc-fg">
+                            {tool}
+                            <button
+                              onClick={() => removeAllowedTool(tool)}
+                              className="text-cc-muted hover:text-cc-error transition-colors cursor-pointer"
+                            >
+                              <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5">
+                                <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z" />
+                              </svg>
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      value={allowedToolInput}
+                      onChange={(e) => setAllowedToolInput(e.target.value)}
+                      onKeyDown={addAllowedTool}
+                      placeholder="Type tool name and press Enter"
+                      className="w-full px-2 py-1.5 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-xs font-mono-code focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                    />
+                    <p className="text-[10px] text-cc-muted">Leave empty to allow all tools.</p>
+                  </div>
+                </div>
+              </div>
             )}
           </section>
 

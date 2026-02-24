@@ -939,6 +939,10 @@ export const api = {
   regenerateAgentWebhookSecret: (id: string) =>
     post<AgentInfo>(`/agents/${encodeURIComponent(id)}/regenerate-secret`),
 
+  // Skills
+  listSkills: () =>
+    get<{ slug: string; name: string; description: string; path: string }[]>("/skills"),
+
   // Cross-session messaging
   sendSessionMessage: (sessionId: string, content: string) =>
     post<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/message`, { content }),
