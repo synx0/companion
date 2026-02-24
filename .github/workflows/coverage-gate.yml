@@ -40,6 +40,8 @@ jobs:
           # ── Helper function ────────────────────────────────────────────
           check_coverage() {
             local PROJECT="$1"   # "web" or "platform"
+            # Optional subdirectory filter(s): e.g. "server/" to only check server code
+            local SUBDIRS="${2:-server/ src/}"
             local SUMMARY="$PROJECT/coverage/coverage-summary.json"
 
             if [ ! -f "$SUMMARY" ]; then
@@ -47,9 +49,15 @@ jobs:
               return
             fi
 
+            # Build the diff paths from project + subdirectories
+            local DIFF_PATHS=""
+            for sub in $SUBDIRS; do
+              DIFF_PATHS="$DIFF_PATHS $PROJECT/$sub"
+            done
+
             # Source files added or modified in this PR (relative to repo root)
             local CHANGED
-            CHANGED=$(git diff --name-only --diff-filter=ACM origin/main...HEAD -- "$PROJECT/server/" "$PROJECT/src/" \
+            CHANGED=$(git diff --name-only --diff-filter=ACM origin/main...HEAD -- $DIFF_PATHS \
               | grep -E '\.(ts|tsx)$' \
               | grep -v '\.test\.\|\.spec\.\|__mocks__\|test-setup' || true)
 
@@ -96,7 +104,8 @@ jobs:
           # ── Run for both projects ──────────────────────────────────────
           check_coverage "web"
           echo ""
-          check_coverage "platform"
+          # Platform: only gate server code (frontend is scaffolding for now)
+          check_coverage "platform" "server/"
 
           echo ""
           if [ "$FAIL" = "1" ]; then
