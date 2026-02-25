@@ -1,23 +1,26 @@
-import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { Hono } from "hono";
 import { registerFsRoutes } from "./fs-routes.js";
 
+/** Create a temp dir with symlinks resolved (macOS /var → /private/var) */
+const mkRealTempDir = (prefix: string) => realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+
 // Create a Hono app with the fs routes for testing
 let app: Hono;
 let tempDir: string;
 
 beforeEach(() => {
-  tempDir = mkdtempSync(join(tmpdir(), "fs-raw-test-"));
+  tempDir = mkRealTempDir("fs-raw-test-");
   app = new Hono();
   // Pass tempDir as an allowed base so test files are accessible
   registerFsRoutes(app, { allowedBases: [tempDir] });
 });
 
-afterAll(() => {
+afterEach(() => {
   try {
     rmSync(tempDir, { recursive: true, force: true });
   } catch {
@@ -535,7 +538,7 @@ describe("git-related routes", () => {
 
   beforeEach(() => {
     // Create a fresh temp directory and initialize a git repo for each test
-    gitDir = mkdtempSync(join(tmpdir(), "fs-git-test-"));
+    gitDir = mkRealTempDir("fs-git-test-");
     execSync("git init", { cwd: gitDir });
     execSync("git config user.email 'test@test.com'", { cwd: gitDir });
     execSync("git config user.name 'Test'", { cwd: gitDir });
@@ -544,7 +547,7 @@ describe("git-related routes", () => {
     registerFsRoutes(gitApp, { allowedBases: [gitDir] });
   });
 
-  afterAll(() => {
+  afterEach(() => {
     try {
       rmSync(gitDir, { recursive: true, force: true });
     } catch {
@@ -637,7 +640,7 @@ describe("git-related routes", () => {
 
     it("returns empty diff gracefully for a non-git directory", async () => {
       // A file outside any git repo should return an empty diff (caught by try/catch)
-      const nonGitDir = mkdtempSync(join(tmpdir(), "fs-nogit-test-"));
+      const nonGitDir = mkRealTempDir("fs-nogit-test-");
       const nonGitApp = new Hono();
       registerFsRoutes(nonGitApp, { allowedBases: [nonGitDir] });
 
@@ -657,7 +660,7 @@ describe("git-related routes", () => {
     it("handles untracked file in fresh repo with no HEAD", async () => {
       // In a fresh git repo with no commits, HEAD doesn't exist.
       // The diff route should handle this gracefully.
-      const freshDir = mkdtempSync(join(tmpdir(), "fs-fresh-git-"));
+      const freshDir = mkRealTempDir("fs-fresh-git-");
       execSync("git init", { cwd: freshDir });
       execSync("git config user.email 'test@test.com'", { cwd: freshDir });
       execSync("git config user.name 'Test'", { cwd: freshDir });
@@ -755,7 +758,7 @@ describe("git-related routes", () => {
 
     it("returns empty files array for a non-git directory", async () => {
       // A directory that is not a git repo should gracefully return empty files
-      const nonGitDir = mkdtempSync(join(tmpdir(), "fs-nogit-changed-"));
+      const nonGitDir = mkRealTempDir("fs-nogit-changed-");
       const nonGitApp = new Hono();
       registerFsRoutes(nonGitApp, { allowedBases: [nonGitDir] });
 
@@ -823,7 +826,7 @@ describe("GET /fs/claude-md", () => {
   let claudeApp: Hono;
 
   beforeEach(() => {
-    claudeDir = mkdtempSync(join(tmpdir(), "fs-claude-md-test-"));
+    claudeDir = mkRealTempDir("fs-claude-md-test-");
     // Initialize a git repo so the walk-up logic stops at the repo root
     execSync("git init", { cwd: claudeDir });
     execSync("git config user.email 'test@test.com'", { cwd: claudeDir });
@@ -833,7 +836,7 @@ describe("GET /fs/claude-md", () => {
     registerFsRoutes(claudeApp, { allowedBases: [claudeDir] });
   });
 
-  afterAll(() => {
+  afterEach(() => {
     try {
       rmSync(claudeDir, { recursive: true, force: true });
     } catch {
@@ -1039,7 +1042,7 @@ describe("GET /fs/claude-config", () => {
   let configApp: Hono;
 
   beforeEach(() => {
-    configDir = mkdtempSync(join(tmpdir(), "fs-config-test-"));
+    configDir = mkRealTempDir("fs-config-test-");
     // Initialize a git repo to define the project root
     execSync("git init", { cwd: configDir });
     execSync("git config user.email 'test@test.com'", { cwd: configDir });
@@ -1178,7 +1181,7 @@ describe("GET /fs/claude-config", () => {
 
   it("uses cwd as project root when not in a git repo", async () => {
     // Without a git repo, project root falls back to cwd
-    const nonGitDir = mkdtempSync(join(tmpdir(), "fs-config-nogit-"));
+    const nonGitDir = mkRealTempDir("fs-config-nogit-");
     const nonGitApp = new Hono();
     registerFsRoutes(nonGitApp, { allowedBases: [nonGitDir] });
 
