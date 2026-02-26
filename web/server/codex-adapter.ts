@@ -2244,56 +2244,6 @@ export class CodexAdapter {
     return out;
   }
 
-  private normalizeRawMcpServerConfig(value: unknown): Record<string, unknown> {
-    const cfg = this.asRecord(value) || {};
-    const out: Record<string, unknown> = {};
-
-    // Keep only fields supported by Codex raw MCP config schema
-    if (typeof cfg.command === "string") out.command = cfg.command;
-    if (Array.isArray(cfg.args)) out.args = cfg.args.filter((a) => typeof a === "string");
-    if (typeof cfg.cwd === "string") out.cwd = cfg.cwd;
-    if (typeof cfg.url === "string") out.url = cfg.url;
-    if (typeof cfg.enabled === "boolean") out.enabled = cfg.enabled;
-    if (typeof cfg.required === "boolean") out.required = cfg.required;
-
-    const env = this.asRecord(cfg.env);
-    if (env) out.env = Object.fromEntries(
-      Object.entries(env).filter(([, v]) => typeof v === "string"),
-    );
-
-    const envHttpHeaders = this.asRecord(cfg.env_http_headers);
-    if (envHttpHeaders) out.env_http_headers = Object.fromEntries(
-      Object.entries(envHttpHeaders).filter(([, v]) => typeof v === "string"),
-    );
-
-    const httpHeaders = this.asRecord(cfg.http_headers);
-    if (httpHeaders) out.http_headers = Object.fromEntries(
-      Object.entries(httpHeaders).filter(([, v]) => typeof v === "string"),
-    );
-
-    const asStringArray = (arr: unknown): string[] | undefined =>
-      Array.isArray(arr)
-        ? arr.filter((x): x is string => typeof x === "string")
-        : undefined;
-
-    const disabledTools = asStringArray(cfg.disabled_tools);
-    if (disabledTools) out.disabled_tools = disabledTools;
-    const enabledTools = asStringArray(cfg.enabled_tools);
-    if (enabledTools) out.enabled_tools = enabledTools;
-    const envVars = asStringArray(cfg.env_vars);
-    if (envVars) out.env_vars = envVars;
-    const scopes = asStringArray(cfg.scopes);
-    if (scopes) out.scopes = scopes;
-
-    if (typeof cfg.startup_timeout_ms === "number") out.startup_timeout_ms = cfg.startup_timeout_ms;
-    if (typeof cfg.startup_timeout_sec === "number") out.startup_timeout_sec = cfg.startup_timeout_sec;
-    if (typeof cfg.tool_timeout_sec === "number") out.tool_timeout_sec = cfg.tool_timeout_sec;
-    if (typeof cfg.bearer_token === "string") out.bearer_token = cfg.bearer_token;
-    if (typeof cfg.bearer_token_env_var === "string") out.bearer_token_env_var = cfg.bearer_token_env_var;
-
-    return out;
-  }
-
   private mapMcpTools(
     tools: Record<string, { name?: string; annotations?: unknown }> | undefined,
   ): McpServerDetail["tools"] {
