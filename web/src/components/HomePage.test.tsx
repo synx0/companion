@@ -1101,13 +1101,11 @@ describe("HomePage", () => {
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
     fireEvent.click(screen.getByRole("button", { name: /branch from session/i }));
 
-    // Wait for initial load
-    await waitFor(() => {
-      expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(1);
-    });
+    // Wait for initial load to finish (button transitions from "Refreshing..." to its idle label)
+    const refreshButton = await screen.findByRole("button", { name: /refresh detected sessions/i });
+    expect(mockApi.discoverClaudeSessions).toHaveBeenCalledTimes(1);
 
     // Click refresh
-    const refreshButton = screen.getByRole("button", { name: /refresh detected sessions/i });
     fireEvent.click(refreshButton);
 
     await waitFor(() => {
