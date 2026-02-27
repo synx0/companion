@@ -23,6 +23,7 @@ vi.mock("../api.js", () => ({
     gitPull: vi.fn().mockResolvedValue({ success: true, output: "", git_ahead: 0, git_behind: 0 }),
     listPrompts: (...args: unknown[]) => mockListPrompts(...args),
     createPrompt: (...args: unknown[]) => mockCreatePrompt(...args),
+    getSettings: vi.fn().mockResolvedValue({ deepgramApiKeyConfigured: false }),
   },
 }));
 

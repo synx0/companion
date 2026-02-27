@@ -24,6 +24,7 @@ beforeEach(() => {
     aiValidationEnabled: false,
     aiValidationAutoApprove: true,
     aiValidationAutoDeny: true,
+    deepgramApiKey: "",
     updatedAt: 0,
   });
 });
@@ -54,6 +55,7 @@ describe("generateSessionTitle", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -91,6 +93,7 @@ describe("generateSessionTitle", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -169,6 +172,7 @@ describe("generateSessionTitle", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({

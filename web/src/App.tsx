@@ -22,6 +22,7 @@ const Playground = lazy(() => import("./components/Playground.js").then((m) => (
 const SettingsPage = lazy(() => import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })));
 const IntegrationsPage = lazy(() => import("./components/IntegrationsPage.js").then((m) => ({ default: m.IntegrationsPage })));
 const LinearSettingsPage = lazy(() => import("./components/LinearSettingsPage.js").then((m) => ({ default: m.LinearSettingsPage })));
+const DeepgramSettingsPage = lazy(() => import("./components/DeepgramSettingsPage.js").then((m) => ({ default: m.DeepgramSettingsPage })));
 const PromptsPage = lazy(() => import("./components/PromptsPage.js").then((m) => ({ default: m.PromptsPage })));
 const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => ({ default: m.EnvManager })));
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
@@ -65,6 +66,7 @@ export default function App() {
   const isPromptsPage = route.page === "prompts";
   const isIntegrationsPage = route.page === "integrations";
   const isLinearIntegrationPage = route.page === "integration-linear";
+  const isDeepgramIntegrationPage = route.page === "integration-deepgram";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
   const isScheduledPage = route.page === "scheduled";
@@ -207,6 +209,12 @@ export default function App() {
           {isLinearIntegrationPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><LinearSettingsPage embedded /></Suspense>
+            </div>
+          )}
+
+          {isDeepgramIntegrationPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><DeepgramSettingsPage embedded /></Suspense>
             </div>
           )}
 

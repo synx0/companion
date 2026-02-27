@@ -35,6 +35,7 @@ describe("settings-manager", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
   });
@@ -77,6 +78,7 @@ describe("settings-manager", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 123,
     });
   });
@@ -126,6 +128,7 @@ describe("settings-manager", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
   });

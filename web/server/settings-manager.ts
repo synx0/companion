@@ -20,6 +20,7 @@ export interface CompanionSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  deepgramApiKey: string;
   updatedAt: number;
 }
 
@@ -38,6 +39,7 @@ let settings: CompanionSettings = {
   aiValidationEnabled: false,
   aiValidationAutoApprove: true,
   aiValidationAutoDeny: true,
+  deepgramApiKey: "",
   updatedAt: 0,
 };
 
@@ -56,6 +58,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
     aiValidationAutoApprove: typeof raw?.aiValidationAutoApprove === "boolean" ? raw.aiValidationAutoApprove : true,
     aiValidationAutoDeny: typeof raw?.aiValidationAutoDeny === "boolean" ? raw.aiValidationAutoDeny : true,
+    deepgramApiKey: typeof raw?.deepgramApiKey === "string" ? raw.deepgramApiKey : "",
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -84,7 +87,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny">>,
+  patch: Partial<Pick<CompanionSettings, "openrouterApiKey" | "openrouterModel" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "editorTabEnabled" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "deepgramApiKey">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -98,6 +101,7 @@ export function updateSettings(
     aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
     aiValidationAutoApprove: patch.aiValidationAutoApprove ?? settings.aiValidationAutoApprove,
     aiValidationAutoDeny: patch.aiValidationAutoDeny ?? settings.aiValidationAutoDeny,
+    deepgramApiKey: patch.deepgramApiKey ?? settings.deepgramApiKey,
     updatedAt: Date.now(),
   });
   persist();

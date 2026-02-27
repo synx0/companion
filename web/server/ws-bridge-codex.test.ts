@@ -121,6 +121,7 @@ describe("attachCodexAdapterHandlers", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
   });
@@ -872,6 +873,7 @@ describe("attachCodexAdapterHandlers", () => {
         aiValidationEnabled: true,
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: true,
+        deepgramApiKey: "",
         updatedAt: 0,
       });
     }
@@ -1035,6 +1037,7 @@ describe("attachCodexAdapterHandlers", () => {
         aiValidationEnabled: false,  // disabled
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: true,
+        deepgramApiKey: "",
         updatedAt: 0,
       });
 
@@ -1068,6 +1071,7 @@ describe("attachCodexAdapterHandlers", () => {
         aiValidationEnabled: true,
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: true,
+        deepgramApiKey: "",
         updatedAt: 0,
       });
 
@@ -1166,6 +1170,7 @@ describe("attachCodexAdapterHandlers", () => {
         aiValidationEnabled: true,
         aiValidationAutoApprove: false,  // disabled
         aiValidationAutoDeny: true,
+        deepgramApiKey: "",
         updatedAt: 0,
       });
 
@@ -1209,6 +1214,7 @@ describe("attachCodexAdapterHandlers", () => {
         aiValidationEnabled: true,
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: false,  // disabled
+        deepgramApiKey: "",
         updatedAt: 0,
       });
 

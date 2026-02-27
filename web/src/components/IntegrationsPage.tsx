@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { navigateHome, navigateToSession } from "../utils/routing.js";
 import { useStore } from "../store.js";
 import { LinearLogo } from "./LinearLogo.js";
+import { DeepgramLogo } from "./DeepgramLogo.js";
 
 interface IntegrationsPageProps {
   embedded?: boolean;
@@ -12,6 +13,9 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
   const [linearConfigured, setLinearConfigured] = useState(false);
   const [linearConnected, setLinearConnected] = useState(false);
   const [linearViewerLabel, setLinearViewerLabel] = useState("");
+  const [deepgramConfigured, setDeepgramConfigured] = useState(false);
+  const [deepgramConnected, setDeepgramConnected] = useState(false);
+  const [deepgramProjectName, setDeepgramProjectName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -19,13 +23,31 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
     api.getSettings()
       .then((settings) => {
         setLinearConfigured(settings.linearApiKeyConfigured);
-        if (!settings.linearApiKeyConfigured) return;
-        return api.getLinearConnection().then((info) => {
-          setLinearConnected(info.connected);
-          const label = info.viewerName || info.viewerEmail || "Connected account";
-          const team = info.teamName ? ` • ${info.teamName}` : "";
-          setLinearViewerLabel(`${label}${team}`);
-        });
+        setDeepgramConfigured(settings.deepgramApiKeyConfigured);
+
+        const promises: Promise<void>[] = [];
+
+        if (settings.linearApiKeyConfigured) {
+          promises.push(
+            api.getLinearConnection().then((info) => {
+              setLinearConnected(info.connected);
+              const label = info.viewerName || info.viewerEmail || "Connected account";
+              const team = info.teamName ? ` \u2022 ${info.teamName}` : "";
+              setLinearViewerLabel(`${label}${team}`);
+            }),
+          );
+        }
+
+        if (settings.deepgramApiKeyConfigured) {
+          promises.push(
+            api.verifyDeepgramConnection().then((info) => {
+              setDeepgramConnected(info.connected);
+              setDeepgramProjectName(info.projectName || "");
+            }),
+          );
+        }
+
+        return Promise.all(promises);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -36,6 +58,14 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
     : linearConnected
       ? "Connected"
       : linearConfigured
+        ? "Needs verification"
+        : "Not connected";
+
+  const deepgramStatus = loading
+    ? "Checking..."
+    : deepgramConnected
+      ? "Connected"
+      : deepgramConfigured
         ? "Needs verification"
         : "Not connected";
 
@@ -72,6 +102,7 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
           </div>
         )}
 
+        {/* Linear card */}
         <section className="group relative overflow-hidden rounded-3xl border border-cc-border/80 bg-cc-card p-5 pb-16 sm:p-7 sm:pb-7 transition-all duration-300 hover:border-cc-primary/35 hover:shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_140%_at_100%_0%,rgba(251,146,60,0.18),transparent_52%)]" />
           <div className="pointer-events-none absolute inset-0 opacity-30 bg-[linear-gradient(120deg,transparent_0%,rgba(255,255,255,0.04)_35%,transparent_62%)]" />
@@ -107,6 +138,52 @@ export function IntegrationsPage({ embedded = false }: IntegrationsPageProps) {
               }}
               aria-label="Open Linear settings"
               title="Open Linear settings"
+              className="absolute bottom-0 right-0 sm:bottom-0 sm:right-0 inline-flex h-10 w-10 items-center justify-center rounded-full border border-cc-primary/28 bg-cc-primary/12 text-cc-fg transition-colors hover:border-cc-primary/50 hover:bg-cc-primary/20 focus:outline-none focus:ring-2 focus:ring-cc-primary/35 cursor-pointer"
+            >
+              <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M9.67 4.53 10 2h4l.33 2.53a7.9 7.9 0 0 1 1.7.7l2.03-1.55 2.83 2.83-1.55 2.03c.28.54.51 1.1.7 1.7L22 10v4l-2.53.33a7.9 7.9 0 0 1-.7 1.7l1.55 2.03-2.83 2.83-2.03-1.55c-.54.28-1.1.51-1.7.7L14 22h-4l-.33-2.53a7.9 7.9 0 0 1-1.7-.7l-2.03 1.55-2.83-2.83 1.55-2.03a7.9 7.9 0 0 1-.7-1.7L2 14v-4l2.53-.33c.19-.6.42-1.16.7-1.7L3.68 5.94 6.5 3.1l2.03 1.55c.54-.28 1.1-.51 1.7-.7Z" />
+                <circle cx="12" cy="12" r="3.2" />
+              </svg>
+            </button>
+          </div>
+        </section>
+
+        {/* Deepgram card */}
+        <section className="group relative overflow-hidden rounded-3xl border border-cc-border/80 bg-cc-card p-5 pb-16 sm:p-7 sm:pb-7 mt-6 transition-all duration-300 hover:border-cc-primary/35 hover:shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_140%_at_100%_0%,rgba(6,182,212,0.18),transparent_52%)]" />
+          <div className="pointer-events-none absolute inset-0 opacity-30 bg-[linear-gradient(120deg,transparent_0%,rgba(255,255,255,0.04)_35%,transparent_62%)]" />
+          <div className="relative min-w-0">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-cc-border bg-cc-hover/55 px-3 py-1.5 text-xs tracking-wide text-cc-muted">
+                <DeepgramLogo className="h-3.5 w-3.5 text-cc-fg" />
+                <span>Deepgram</span>
+                {deepgramConnected && (
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full bg-cc-success shadow-[0_0_0_3px_rgba(34,197,94,0.15)]"
+                    aria-label="Connected"
+                    title="Connected"
+                  />
+                )}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <h2 className="text-[clamp(1.45rem,2.6vw,2rem)] font-semibold leading-[1.12] tracking-tight text-cc-fg">
+                  Push-to-talk dictation
+                </h2>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cc-muted sm:text-[15px]">
+                Hold the microphone button in the Composer to speak. Audio is transcribed server-side and inserted as text.
+              </p>
+              <div className="mt-4 inline-flex max-w-full items-center rounded-lg border border-cc-border/80 bg-black/10 px-3 py-1.5 text-xs text-cc-muted/95">
+                <span className="truncate">{deepgramProjectName || "No project linked yet"}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.hash = "#/integrations/deepgram";
+              }}
+              aria-label="Open Deepgram settings"
+              title="Open Deepgram settings"
               className="absolute bottom-0 right-0 sm:bottom-0 sm:right-0 inline-flex h-10 w-10 items-center justify-center rounded-full border border-cc-primary/28 bg-cc-primary/12 text-cc-fg transition-colors hover:border-cc-primary/50 hover:bg-cc-primary/20 focus:outline-none focus:ring-2 focus:ring-cc-primary/35 cursor-pointer"
             >
               <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">

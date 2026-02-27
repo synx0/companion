@@ -380,6 +380,7 @@ export interface AppSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  deepgramApiKeyConfigured: boolean;
 }
 
 export interface LinearWorkflowState {
@@ -835,6 +836,7 @@ export const api = {
     linearAutoTransitionStateId?: string;
     linearAutoTransitionStateName?: string;
     editorTabEnabled?: boolean;
+    deepgramApiKey?: string;
   }) => put<AppSettings>("/settings", data),
   searchLinearIssues: (query: string, limit = 8) =>
     get<{ issues: LinearIssue[] }>(
@@ -880,6 +882,32 @@ export const api = {
       `/linear/issues/${encodeURIComponent(issueId)}/comments`,
       { body },
     ),
+
+  // Deepgram
+  verifyDeepgramConnection: () =>
+    post<{ connected: boolean; projectName?: string; error?: string }>(
+      "/deepgram/verify",
+    ),
+  transcribeAudio: async (audioBlob: Blob, keywords?: string): Promise<{ text: string }> => {
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "recording.webm");
+    const params = keywords ? `?keywords=${encodeURIComponent(keywords)}` : "";
+    const start = nowMs();
+    const res = await fetch(`${BASE}/deepgram/transcribe${params}`, {
+      method: "POST",
+      headers: { ...getAuthHeaders() },
+      body: formData,
+    });
+    const durationMs = nowMs() - start;
+    handle401(res.status);
+    if (!res.ok) {
+      trackApiFailure("POST", "/deepgram/transcribe", durationMs, res.status);
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    trackApiSuccess("POST", "/deepgram/transcribe", durationMs, res.status);
+    return res.json();
+  },
 
   // Git operations
   getRepoInfo: (path: string) =>

@@ -32,6 +32,10 @@ describe("parseHash", () => {
     expect(parseHash("#/integrations/linear")).toEqual({ page: "integration-linear" });
   });
 
+  it("parses deepgram integration route", () => {
+    expect(parseHash("#/integrations/deepgram")).toEqual({ page: "integration-deepgram" });
+  });
+
   it("parses terminal route", () => {
     expect(parseHash("#/terminal")).toEqual({ page: "terminal" });
   });

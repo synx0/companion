@@ -9,6 +9,7 @@ import { MentionMenu } from "./MentionMenu.js";
 import { useMentionMenu } from "../utils/use-mention-menu.js";
 
 import { readFileAsBase64, type ImageAttachment } from "../utils/image.js";
+import { useAudioRecorder } from "../utils/use-audio-recorder.js";
 
 let idCounter = 0;
 
@@ -40,6 +41,30 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const isCodex = sessionData?.backend_type === "codex";
   const modes: ModeOption[] = isCodex ? CODEX_MODES : CLAUDE_MODES;
   const modeLabel = modes.find((m) => m.value === currentMode)?.label?.toLowerCase() || currentMode;
+
+  const [deepgramConfigured, setDeepgramConfigured] = useState(false);
+  useEffect(() => {
+    api.getSettings().then((s) => setDeepgramConfigured(s.deepgramApiKeyConfigured)).catch(() => {});
+  }, []);
+
+  const { state: recordingState, startRecording, stopRecording } = useAudioRecorder({
+    onTranscript: (transcribedText) => {
+      setText((prev) => {
+        const separator = prev.trim() ? " " : "";
+        return prev + separator + transcribedText;
+      });
+      // Auto-resize textarea after transcript insertion
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "auto";
+          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
+        }
+      });
+    },
+    onError: (err) => {
+      console.warn("Transcription error:", err);
+    },
+  });
 
   const mention = useMentionMenu({
     text,
@@ -222,6 +247,17 @@ export function Composer({ sessionId }: { sessionId: string }) {
       && ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey))
     ) {
       e.preventDefault();
+      return;
+    }
+
+    // Push-to-talk keyboard shortcut (Ctrl+Shift+M)
+    if (e.key === "m" && e.ctrlKey && e.shiftKey && deepgramConfigured) {
+      e.preventDefault();
+      if (recordingState === "recording") {
+        stopRecording();
+      } else if (recordingState === "idle") {
+        startRecording();
+      }
       return;
     }
 
@@ -528,6 +564,47 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 <path d="M2 11l3-3 2 2 3-4 4 5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
+
+            {/* Push-to-talk microphone (mobile) */}
+            {deepgramConfigured && (
+              <button
+                onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
+                onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onMouseLeave={() => { if (recordingState === "recording") stopRecording(); }}
+                disabled={!isConnected || recordingState === "transcribing"}
+                className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                  recordingState === "recording"
+                    ? "text-cc-error bg-cc-error/10 animate-pulse cursor-pointer"
+                    : recordingState === "transcribing"
+                      ? "text-cc-muted opacity-50 cursor-wait"
+                      : isConnected
+                        ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                        : "text-cc-muted opacity-30 cursor-not-allowed"
+                }`}
+                title={
+                  recordingState === "recording"
+                    ? "Release to transcribe"
+                    : recordingState === "transcribing"
+                      ? "Transcribing..."
+                      : "Hold to record (push-to-talk)"
+                }
+                aria-label={
+                  recordingState === "recording"
+                    ? "Recording - release to transcribe"
+                    : recordingState === "transcribing"
+                      ? "Transcribing audio"
+                      : "Push-to-talk microphone"
+                }
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                  <path d="M8 1.5a2 2 0 0 0-2 2v4a2 2 0 0 0 4 0v-4a2 2 0 0 0-2-2z" fill={recordingState === "recording" ? "currentColor" : "none"} />
+                  <path d="M12 6.5v1a4 4 0 0 1-8 0v-1" strokeLinecap="round" />
+                  <path d="M8 11.5v2.5M6 14h4" strokeLinecap="round" />
+                </svg>
+              </button>
+            )}
           </div>
 
           {/* Textarea row */}
@@ -620,6 +697,45 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
               </svg>
             </button>
+
+            {/* Push-to-talk microphone (desktop) */}
+            {deepgramConfigured && (
+              <button
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onMouseLeave={() => { if (recordingState === "recording") stopRecording(); }}
+                disabled={!isConnected || recordingState === "transcribing"}
+                className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                  recordingState === "recording"
+                    ? "text-cc-error bg-cc-error/10 animate-pulse cursor-pointer"
+                    : recordingState === "transcribing"
+                      ? "text-cc-muted opacity-50 cursor-wait"
+                      : isConnected
+                        ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+                        : "text-cc-muted opacity-30 cursor-not-allowed"
+                }`}
+                title={
+                  recordingState === "recording"
+                    ? "Release to transcribe"
+                    : recordingState === "transcribing"
+                      ? "Transcribing..."
+                      : "Hold to record (Ctrl+Shift+M)"
+                }
+                aria-label={
+                  recordingState === "recording"
+                    ? "Recording - release to transcribe"
+                    : recordingState === "transcribing"
+                      ? "Transcribing audio"
+                      : "Push-to-talk microphone"
+                }
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                  <path d="M8 1.5a2 2 0 0 0-2 2v4a2 2 0 0 0 4 0v-4a2 2 0 0 0-2-2z" fill={recordingState === "recording" ? "currentColor" : "none"} />
+                  <path d="M12 6.5v1a4 4 0 0 1-8 0v-1" strokeLinecap="round" />
+                  <path d="M8 11.5v2.5M6 14h4" strokeLinecap="round" />
+                </svg>
+              </button>
+            )}
 
             {/* Mode toggle */}
             <button

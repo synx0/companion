@@ -1586,6 +1586,61 @@ export function Playground() {
         <Section title="Session Items" description="Sidebar session rows — status dot, backend badge, Docker indicator, archive on hover">
           <PlaygroundSessionItems />
         </Section>
+
+        {/* ─── Push-to-Talk Microphone Button ──────────────────── */}
+        <Section title="Push-to-Talk Microphone" description="Mic button states in the Composer toolbar — idle, recording, transcribing">
+          <div className="space-y-4 max-w-3xl">
+            <Card label="Idle">
+              <div className="flex items-center gap-3">
+                <button
+                  className="flex items-center justify-center w-8 h-8 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer transition-colors"
+                  title="Hold to record (Ctrl+Shift+M)"
+                  aria-label="Push-to-talk microphone"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                    <path d="M8 1.5a2 2 0 0 0-2 2v4a2 2 0 0 0 4 0v-4a2 2 0 0 0-2-2z" />
+                    <path d="M12 6.5v1a4 4 0 0 1-8 0v-1" strokeLinecap="round" />
+                    <path d="M8 11.5v2.5M6 14h4" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <span className="text-xs text-cc-muted">Default idle state</span>
+              </div>
+            </Card>
+            <Card label="Recording">
+              <div className="flex items-center gap-3">
+                <button
+                  className="flex items-center justify-center w-8 h-8 rounded-md text-cc-error bg-cc-error/10 animate-pulse cursor-pointer transition-colors"
+                  title="Release to transcribe"
+                  aria-label="Recording - release to transcribe"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                    <path d="M8 1.5a2 2 0 0 0-2 2v4a2 2 0 0 0 4 0v-4a2 2 0 0 0-2-2z" fill="currentColor" />
+                    <path d="M12 6.5v1a4 4 0 0 1-8 0v-1" strokeLinecap="round" />
+                    <path d="M8 11.5v2.5M6 14h4" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <span className="text-xs text-cc-muted">Active recording — pulsing red</span>
+              </div>
+            </Card>
+            <Card label="Transcribing">
+              <div className="flex items-center gap-3">
+                <button
+                  className="flex items-center justify-center w-8 h-8 rounded-md text-cc-muted opacity-50 cursor-wait transition-colors"
+                  title="Transcribing..."
+                  aria-label="Transcribing audio"
+                  disabled
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+                    <path d="M8 1.5a2 2 0 0 0-2 2v4a2 2 0 0 0 4 0v-4a2 2 0 0 0-2-2z" />
+                    <path d="M12 6.5v1a4 4 0 0 1-8 0v-1" strokeLinecap="round" />
+                    <path d="M8 11.5v2.5M6 14h4" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <span className="text-xs text-cc-muted">Waiting for Deepgram transcription</span>
+              </div>
+            </Card>
+          </div>
+        </Section>
       </div>
     </div>
   );

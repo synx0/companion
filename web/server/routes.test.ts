@@ -79,6 +79,7 @@ vi.mock("./settings-manager.js", () => ({
     aiValidationEnabled: false,
     aiValidationAutoApprove: true,
     aiValidationAutoDeny: true,
+    deepgramApiKey: "",
     updatedAt: 0,
   })),
   updateSettings: vi.fn((patch) => ({
@@ -1720,6 +1721,7 @@ describe("GET /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 123,
     });
 
@@ -1737,6 +1739,7 @@ describe("GET /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKeyConfigured: false,
     });
   });
 
@@ -1752,6 +1755,7 @@ describe("GET /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 123,
     });
 
@@ -1769,6 +1773,7 @@ describe("GET /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKeyConfigured: false,
     });
   });
 });
@@ -1786,6 +1791,7 @@ describe("PUT /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 456,
     });
 
@@ -1807,6 +1813,7 @@ describe("PUT /api/settings", () => {
       aiValidationEnabled: undefined,
       aiValidationAutoApprove: undefined,
       aiValidationAutoDeny: undefined,
+      deepgramApiKey: undefined,
     });
     const json = await res.json();
     expect(json).toEqual({
@@ -1819,6 +1826,7 @@ describe("PUT /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKeyConfigured: false,
     });
   });
 
@@ -1834,6 +1842,7 @@ describe("PUT /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 789,
     });
 
@@ -1852,6 +1861,10 @@ describe("PUT /api/settings", () => {
       linearAutoTransitionStateId: undefined,
       linearAutoTransitionStateName: undefined,
       editorTabEnabled: undefined,
+      aiValidationEnabled: undefined,
+      aiValidationAutoApprove: undefined,
+      aiValidationAutoDeny: undefined,
+      deepgramApiKey: undefined,
     });
   });
 
@@ -1867,6 +1880,7 @@ describe("PUT /api/settings", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 999,
     });
 
@@ -1885,6 +1899,10 @@ describe("PUT /api/settings", () => {
       linearAutoTransitionStateId: undefined,
       linearAutoTransitionStateName: undefined,
       editorTabEnabled: undefined,
+      aiValidationEnabled: undefined,
+      aiValidationAutoApprove: undefined,
+      aiValidationAutoDeny: undefined,
+      deepgramApiKey: undefined,
     });
   });
 
@@ -1969,6 +1987,7 @@ describe("GET /api/linear/issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -1990,6 +2009,7 @@ describe("GET /api/linear/issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2065,6 +2085,7 @@ describe("GET /api/linear/issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2147,6 +2168,7 @@ describe("GET /api/linear/issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2194,6 +2216,7 @@ describe("GET /api/linear/connection", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2215,6 +2238,7 @@ describe("GET /api/linear/connection", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2259,6 +2283,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2285,6 +2310,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2310,6 +2336,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2336,6 +2363,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2397,6 +2425,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2437,6 +2466,7 @@ describe("GET /api/linear/projects", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2458,6 +2488,7 @@ describe("GET /api/linear/projects", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2510,6 +2541,7 @@ describe("GET /api/linear/project-issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2531,6 +2563,7 @@ describe("GET /api/linear/project-issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
@@ -2598,6 +2631,7 @@ describe("GET /api/linear/project-issues", () => {
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      deepgramApiKey: "",
       updatedAt: 0,
     });
 
