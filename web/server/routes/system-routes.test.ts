@@ -154,6 +154,26 @@ describe("GET /api/sessions/:id/usage-limits", () => {
     expect(json).toEqual({ five_hour: null, seven_day: null, extra_usage: null });
   });
 
+  // When codex rate limits have timestamps in epoch milliseconds (>1e12),
+  // they should pass through without conversion.
+  it("passes through millisecond timestamps from codex rate limits", async () => {
+    wsBridge.getSession.mockReturnValue({ backendType: "codex" } as any);
+    const msTimestamp = 1700000000000; // already in ms
+    wsBridge.getCodexRateLimits.mockReturnValue({
+      primary: { usedPercent: 0.8, windowDurationMins: 300, resetsAt: msTimestamp },
+      secondary: { usedPercent: 0.3, windowDurationMins: 10080, resetsAt: msTimestamp },
+    } as any);
+
+    const res = await app.request("/api/sessions/codex-ms/usage-limits");
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.five_hour.utilization).toBe(0.8);
+    expect(json.five_hour.resets_at).toBe(new Date(msTimestamp).toISOString());
+    expect(json.seven_day.utilization).toBe(0.3);
+    expect(json.seven_day.resets_at).toBe(new Date(msTimestamp).toISOString());
+  });
+
   it("falls back to global usage limits for non-codex sessions", async () => {
     // A claude-type session should use the global getUsageLimits
     wsBridge.getSession.mockReturnValue({ backendType: "claude" } as any);
