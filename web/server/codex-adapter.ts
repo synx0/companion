@@ -156,8 +156,8 @@ const RPC_METHOD_TIMEOUTS: Record<string, number> = {
   "turn/start": 120_000,
   "turn/interrupt": 15_000,
   "codex/configureSession": 30_000,
-  "thread/create": 30_000,
-  "thread/read": 30_000,
+  "thread/start": 30_000,
+  "thread/resume": 30_000,
 };
 
 // ─── Adapter Options ──────────────────────────────────────────────────────────
