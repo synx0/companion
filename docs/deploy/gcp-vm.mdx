@@ -146,13 +146,13 @@ sudo apt-get install -y \
 # --- Docker ---
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
+newgrp docker  # activate group in current session
 
 # --- Node.js 22 ---
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# --- pnpm + Claude Code CLI ---
-sudo npm install -g pnpm@10
+# --- Claude Code CLI ---
 sudo npm install -g @anthropic-ai/claude-code
 
 # --- GitHub CLI ---
@@ -233,11 +233,12 @@ set -euo pipefail
 # Install Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 
-# Join your tailnet
-sudo tailscale up \
-  --auth-key=\"$TAILSCALE_AUTH_KEY\" \
+# Join your tailnet (auth key passed via env var to avoid process-table exposure)
+export TS_AUTHKEY=\"$TAILSCALE_AUTH_KEY\"
+sudo -E tailscale up \
   --hostname=\"$COMPANION_HOSTNAME\" \
   --ssh
+unset TS_AUTHKEY
 
 # Serve The Companion over HTTPS
 sudo tailscale serve --bg 3456
@@ -337,3 +338,8 @@ sudo apt-get install -y unzip
 - Use [Tailscale ACLs](https://tailscale.com/kb/1018/acls) to restrict which devices and users can reach the VM
 - The Companion generates an auth token automatically — see [Authentication](/getting-started/installation#authentication) for details
 - Consider enabling GCP [OS Login](https://cloud.google.com/compute/docs/instances/managing-instance-access) for centralized SSH access control
+- Clear shell history after provisioning to remove any sensitive values: `history -c && history -w`
+
+<Note>
+The provisioning script uses `curl | sh` for Docker, NodeSource, and Tailscale for convenience. For stricter environments, consider using the official APT repositories with GPG signature verification instead. Each provider documents this approach: [Docker APT](https://docs.docker.com/engine/install/ubuntu/), [NodeSource](https://github.com/nodesource/distributions#installation-instructions), [Tailscale](https://tailscale.com/kb/1187/install-ubuntu-2204).
+</Note>
