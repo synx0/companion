@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { generateCliSecret } from "./passkey-manager.js";
 import {
   mkdirSync,
   existsSync,
@@ -457,9 +458,10 @@ export class CliLauncher {
 
     // When running inside a container, the SDK URL should target the host alias
     // so the CLI can connect back to the Hono server running on the host.
+    const cliSecret = generateCliSecret(sessionId);
     const sdkUrl = isContainerized
-      ? `ws://${containerSdkHost}:${this.port}/ws/cli/${sessionId}`
-      : `ws://localhost:${this.port}/ws/cli/${sessionId}`;
+      ? `ws://${containerSdkHost}:${this.port}/ws/cli/${sessionId}?cliSecret=${cliSecret}`
+      : `ws://localhost:${this.port}/ws/cli/${sessionId}?cliSecret=${cliSecret}`;
 
     // Claude Code rejects bypassPermissions when running with root/sudo. Most
     // container images run as root by default, so downgrade to acceptEdits unless

@@ -325,8 +325,8 @@ const IDEMPOTENT_OUTGOING_TYPES = new Set<BrowserOutgoingMessage["type"]>([
 
 function getWsUrl(sessionId: string): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const token = localStorage.getItem("companion_auth_token") || "";
-  return `${proto}//${location.host}/ws/browser/${sessionId}?token=${encodeURIComponent(token)}`;
+  // Auth is handled via HTTP-only session cookie set by passkey login — no token in URL
+  return `${proto}//${location.host}/ws/browser/${sessionId}`;
 }
 
 function getLastSeqStorageKey(sessionId: string): string {

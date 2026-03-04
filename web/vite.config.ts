@@ -36,7 +36,7 @@ export default defineConfig({
     }),
   ],
   server: {
-    host: "0.0.0.0",
+    host: "127.0.0.1",  // loopback only — never expose dev server externally
     port: 5174,
     strictPort: false,
     proxy: {

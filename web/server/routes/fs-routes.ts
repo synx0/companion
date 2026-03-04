@@ -1,13 +1,24 @@
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Hono } from "hono";
 
 /** Ensure a resolved path is within one of the allowed base directories.
- *  Returns the resolved absolute path, or null if it escapes all bases. */
+ *  Uses realpathSync to follow symlinks before checking, preventing symlink
+ *  traversal attacks where a link inside an allowed dir points outside it.
+ *  Falls back to path.resolve() for paths that don't exist yet (e.g. writes). */
 function guardPath(raw: string, allowedBases: string[]): string | null {
-  const abs = resolve(raw);
+  const normalized = resolve(raw);
+  // Resolve symlinks so a link like /home/user/link -> /etc is caught.
+  // realpathSync throws if the path doesn't exist; fall back to normalized path.
+  let abs: string;
+  try {
+    abs = realpathSync(normalized);
+  } catch {
+    abs = normalized;
+  }
   for (const base of allowedBases) {
     if (abs === base || abs.startsWith(base + "/")) return abs;
   }
@@ -24,6 +35,24 @@ function execCaptureStdout(
 ): string {
   try {
     return execSync(command, options);
+  } catch (err: unknown) {
+    const maybe = err as { stdout?: Buffer | string };
+    if (typeof maybe.stdout === "string") return maybe.stdout;
+    if (maybe.stdout && Buffer.isBuffer(maybe.stdout)) {
+      return maybe.stdout.toString("utf-8");
+    }
+    throw err;
+  }
+}
+
+/** Like execCaptureStdout but takes a command + args array to avoid shell injection. */
+function execFileCaptureStdout(
+  file: string,
+  args: string[],
+  options: { cwd?: string; encoding: "utf-8"; timeout: number },
+): string {
+  try {
+    return execFileSync(file, args, options);
   } catch (err: unknown) {
     const maybe = err as { stdout?: Buffer | string };
     if (typeof maybe.stdout === "string") return maybe.stdout;
@@ -225,15 +254,18 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
   api.get("/fs/diff", (c) => {
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "path required" }, 400);
+    // Guard the path before running any git commands against it
+    const absPath = guardPath(filePath, allowedBases());
+    if (!absPath) return c.json({ error: "Path outside allowed directories" }, 403);
     const base = c.req.query("base");
-    const absPath = resolve(filePath);
     try {
       const repoRoot = execSync("git rev-parse --show-toplevel", {
         cwd: dirname(absPath),
         encoding: "utf-8",
         timeout: 5000,
       }).trim();
-      const relPath = execSync(`git -C "${repoRoot}" ls-files --full-name -- "${absPath}"`, {
+      // Use execFileSync + args array to avoid shell injection on user-supplied absPath
+      const relPath = execFileCaptureStdout("git", ["-C", repoRoot, "ls-files", "--full-name", "--", absPath], {
         encoding: "utf-8",
         timeout: 5000,
       }).trim() || absPath;
@@ -244,7 +276,7 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
         const diffBases = resolveBranchDiffBases(repoRoot);
         for (const b of diffBases) {
           try {
-            diff = execCaptureStdout(`git diff ${b} -- "${relPath}"`, {
+            diff = execFileCaptureStdout("git", ["diff", b, "--", relPath], {
               cwd: repoRoot,
               encoding: "utf-8",
               timeout: 5000,
@@ -256,7 +288,7 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
         }
       } else {
         try {
-          diff = execCaptureStdout(`git diff HEAD -- "${relPath}"`, {
+          diff = execFileCaptureStdout("git", ["diff", "HEAD", "--", relPath], {
             cwd: repoRoot,
             encoding: "utf-8",
             timeout: 5000,
@@ -267,13 +299,13 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
       }
 
       if (!diff.trim()) {
-        const untracked = execSync(`git ls-files --others --exclude-standard -- "${relPath}"`, {
+        const untracked = execFileCaptureStdout("git", ["ls-files", "--others", "--exclude-standard", "--", relPath], {
           cwd: repoRoot,
           encoding: "utf-8",
           timeout: 5000,
         }).trim();
         if (untracked) {
-          diff = execCaptureStdout(`git diff --no-index -- /dev/null "${absPath}"`, {
+          diff = execFileCaptureStdout("git", ["diff", "--no-index", "--", "/dev/null", absPath], {
             cwd: repoRoot,
             encoding: "utf-8",
             timeout: 5000,
@@ -295,7 +327,8 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
     const cwd = c.req.query("cwd");
     if (!cwd) return c.json({ error: "cwd required" }, 400);
     const base = c.req.query("base"); // "last-commit" | "default-branch" | undefined
-    const resolvedCwd = resolve(cwd);
+    const resolvedCwd = guardPath(cwd, allowedBases());
+    if (!resolvedCwd) return c.json({ error: "Path outside allowed directories" }, 403);
     try {
       const repoRoot = execSync("git rev-parse --show-toplevel", {
         cwd: resolvedCwd,

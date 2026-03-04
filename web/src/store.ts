@@ -30,7 +30,7 @@ export type QuickTerminalPlacement = "top" | "right" | "bottom" | "left";
 
 export type DiffBase = "last-commit" | "default-branch";
 
-const AUTH_STORAGE_KEY = "companion_auth_token";
+// Auth is now session-cookie-based (WebAuthn passkey). No tokens in localStorage.
 
 interface AppState {
   // Auth
@@ -327,14 +327,9 @@ function getInitialDiffBase(): DiffBase {
   return "last-commit";
 }
 
-function getInitialAuthToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(AUTH_STORAGE_KEY) || null;
-}
-
 export const useStore = create<AppState>((set) => ({
-  authToken: getInitialAuthToken(),
-  isAuthenticated: getInitialAuthToken() !== null,
+  authToken: null,
+  isAuthenticated: false,
   sessions: new Map(),
   sdkSessions: [],
   currentSessionId: getInitialSessionId(),
@@ -403,12 +398,13 @@ export const useStore = create<AppState>((set) => ({
   setSessionCreating: (creating, backend) => set({ sessionCreating: creating, sessionCreatingBackend: backend ?? null }),
   setCreationError: (error) => set({ creationError: error }),
 
-  setAuthToken: (token) => {
-    localStorage.setItem(AUTH_STORAGE_KEY, token);
-    set({ authToken: token, isAuthenticated: true });
+  setAuthToken: (_token) => {
+    // Cookie-based auth: session is set by the server. Just mark as authenticated.
+    set({ authToken: "session", isAuthenticated: true });
   },
   logout: () => {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    // Revoke server session then clear state
+    fetch("/api/passkey/logout", { method: "POST", credentials: "include" }).catch(() => {});
     set({ authToken: null, isAuthenticated: false });
   },
 

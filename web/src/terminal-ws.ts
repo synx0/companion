@@ -16,8 +16,8 @@ export function createTerminalConnection(
   callbacks: TerminalConnectionCallbacks,
 ): TerminalConnection {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const token = localStorage.getItem("companion_auth_token") || "";
-  const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${terminalId}?token=${encodeURIComponent(token)}`;
+  // Auth is handled via HTTP-only session cookie set by passkey login — no token in URL
+  const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${terminalId}`;
   const socket = new WebSocket(wsUrl);
   socket.binaryType = "arraybuffer";
 

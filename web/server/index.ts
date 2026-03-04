@@ -33,7 +33,8 @@ import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { imagePullManager } from "./image-pull-manager.js";
 import { isRunningAsService } from "./service.js";
-import { getToken, verifyToken } from "./auth-manager.js";
+import { verifySession, getSessionFromCookieHeader, verifyCliSecret, revokeCliSecret } from "./passkey-manager.js";
+import { registerPasskeyRoutes } from "./routes/passkey-routes.js";
 import { getCookie } from "hono/cookie";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
@@ -125,12 +126,62 @@ if (recorder.isGloballyEnabled()) {
 
 const app = new Hono();
 
-app.use("/api/*", cors());
+const COMPANION_DOMAIN = process.env.COMPANION_DOMAIN?.trim();
+
+// Allow localhost (dev/tunnel) and COMPANION_DOMAIN (production) origins.
+app.use("/api/*", cors({
+  origin: (origin) => {
+    // Reject requests with no Origin header — non-browser clients don't need CORS
+    if (!origin) return null;
+    try {
+      const { hostname, origin: o } = new URL(origin);
+      if (hostname === "localhost" || hostname === "127.0.0.1") return origin;
+      if (COMPANION_DOMAIN && (hostname === COMPANION_DOMAIN || o === `https://${COMPANION_DOMAIN}`)) return origin;
+    } catch { /* ignore malformed */ }
+    return null;
+  },
+  credentials: true,
+}));
+
+// Security headers — defense-in-depth for internet-facing Cloudflare Tunnel deployments.
+// Applied after CORS so CORS headers are already set before we add security headers.
+app.use("/*", async (c, next) => {
+  await next();
+  // CSP: allow same-origin resources; PostHog analytics (opt-in, CDN may load recorder script)
+  c.header(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self' https://us-assets.i.posthog.com",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com",
+      "font-src 'self' data:",
+      "worker-src 'self' blob:",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "),
+  );
+  c.header("X-Frame-Options", "DENY");
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  // HSTS only when served over HTTPS (i.e., exposed via Cloudflare Tunnel with COMPANION_DOMAIN)
+  if (COMPANION_DOMAIN) {
+    c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+});
+
+// Public passkey auth routes — no session required
+const publicApi = new Hono();
+registerPasskeyRoutes(publicApi);
+app.route("/api", publicApi);
+
+// All other /api routes require a valid session
 app.route("/api", createRoutes(launcher, wsBridge, sessionStore, worktreeTracker, terminalManager, prPoller, recorder, cronScheduler, agentExecutor));
 
-// Dynamic manifest — embeds auth token in start_url so PWA auto-authenticates
-// on first launch. iOS gives standalone PWAs isolated storage from Safari,
-// so this is the only way to bridge auth across the install boundary.
+// Dynamic manifest — session cookie handles PWA auth automatically.
 app.get("/manifest.json", (c) => {
   const manifest = {
     name: "The Companion",
@@ -146,22 +197,6 @@ app.get("/manifest.json", (c) => {
       { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
     ],
   };
-
-  // If the user has an auth cookie (set during login), embed token in start_url.
-  // Safari sends this cookie when fetching the manifest at "Add to Home Screen" time.
-  const authCookie = getCookie(c, "companion_auth");
-  if (authCookie && verifyToken(authCookie)) {
-    manifest.start_url = `/?token=${authCookie}`;
-  } else {
-    // Localhost bypass — always embed the token for same-machine installs
-    const bunServer = c.env as { requestIP?: (req: Request) => { address: string } | null };
-    const ip = bunServer?.requestIP?.(c.req.raw);
-    const addr = ip?.address ?? "";
-    if (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1") {
-      manifest.start_url = `/?token=${getToken()}`;
-    }
-  }
-
   c.header("Content-Type", "application/manifest+json");
   return c.json(manifest);
 });
@@ -171,19 +206,38 @@ if (process.env.NODE_ENV === "production") {
   const distDir = resolve(packageRoot, "dist");
   app.use("/*", cacheControlMiddleware());
   app.use("/*", serveStatic({ root: distDir }));
-  app.get("/*", serveStatic({ path: resolve(distDir, "index.html") }));
+  app.get("/*", (c) => new Response(Bun.file(resolve(distDir, "index.html"))));
 }
 
 const server = Bun.serve<SocketData>({
   port,
+  // Bind to loopback only — defense in depth alongside iptables rules.
+  // This ensures the process itself never accepts external connections
+  // regardless of firewall state.
+  hostname: "127.0.0.1",
   idleTimeout: idleTimeoutSeconds,
   async fetch(req, server) {
     const url = new URL(req.url);
 
+    // Helper: check if request is from localhost (same machine)
+    const reqIp = server.requestIP(req);
+    const reqAddr = reqIp?.address ?? "";
+    const isLocalhost = reqAddr === "127.0.0.1" || reqAddr === "::1" || reqAddr === "::ffff:127.0.0.1";
+
     // ── CLI WebSocket — Claude Code CLI connects here via --sdk-url ────
+    // Requires: (1) localhost origin, (2) per-session cliSecret query param.
     const cliMatch = url.pathname.match(/^\/ws\/cli\/([a-f0-9-]+)$/);
     if (cliMatch) {
       const sessionId = cliMatch[1];
+      const cliSecret = url.searchParams.get("cliSecret");
+      if (!isLocalhost) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      if (!verifyCliSecret(sessionId, cliSecret)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      // Secret is single-use: the CLI holds the URL for the session lifetime,
+      // so we keep the secret in memory until the session ends.
       const upgraded = server.upgrade(req, {
         data: { kind: "cli" as const, sessionId },
       });
@@ -191,16 +245,12 @@ const server = Bun.serve<SocketData>({
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
-    // Helper: check if request is from localhost (same machine)
-    const reqIp = server.requestIP(req);
-    const reqAddr = reqIp?.address ?? "";
-    const isLocalhost = reqAddr === "127.0.0.1" || reqAddr === "::1" || reqAddr === "::ffff:127.0.0.1";
-
     // ── Browser WebSocket — connects to a specific session ─────────────
     const browserMatch = url.pathname.match(/^\/ws\/browser\/([a-f0-9-]+)$/);
     if (browserMatch) {
-      const wsToken = url.searchParams.get("token");
-      if (!isLocalhost && !verifyToken(wsToken)) {
+      const cookieHeader = req.headers.get("cookie") ?? "";
+      const sessionToken = getSessionFromCookieHeader(cookieHeader);
+      if (!verifySession(sessionToken)) {
         return new Response("Unauthorized", { status: 401 });
       }
       const sessionId = browserMatch[1];
@@ -214,8 +264,9 @@ const server = Bun.serve<SocketData>({
     // ── Terminal WebSocket — embedded terminal PTY connection ─────────
     const termMatch = url.pathname.match(/^\/ws\/terminal\/([a-f0-9-]+)$/);
     if (termMatch) {
-      const wsToken = url.searchParams.get("token");
-      if (!isLocalhost && !verifyToken(wsToken)) {
+      const cookieHeader = req.headers.get("cookie") ?? "";
+      const sessionToken = getSessionFromCookieHeader(cookieHeader);
+      if (!verifySession(sessionToken)) {
         return new Response("Unauthorized", { status: 401 });
       }
       const terminalId = termMatch[1];
@@ -255,6 +306,7 @@ const server = Bun.serve<SocketData>({
       const data = ws.data;
       if (data.kind === "cli") {
         wsBridge.handleCLIClose(ws);
+        revokeCliSecret(data.sessionId); // clean up per-session secret
       } else if (data.kind === "browser") {
         wsBridge.handleBrowserClose(ws);
       } else if (data.kind === "terminal") {
@@ -264,13 +316,9 @@ const server = Bun.serve<SocketData>({
   },
 });
 
-const authToken = getToken();
 console.log(`Server running on http://localhost:${server.port}`);
-console.log();
-console.log(`  Auth token: ${authToken}`);
-if (process.env.COMPANION_AUTH_TOKEN) {
-  console.log("  (using COMPANION_AUTH_TOKEN env var)");
-}
+console.log(`  Auth: WebAuthn passkey (Face ID / Touch ID)`);
+console.log(`  Run 'companion-admin create-invite' to generate a registration link`);
 console.log();
 console.log(`  CLI WebSocket:     ws://localhost:${server.port}/ws/cli/:sessionId`);
 console.log(`  Browser WebSocket: ws://localhost:${server.port}/ws/browser/:sessionId`);

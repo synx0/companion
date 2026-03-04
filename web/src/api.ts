@@ -3,19 +3,16 @@ import type { ContentBlock } from "./types.js";
 import { captureEvent, captureException } from "./analytics.js";
 
 const BASE = "/api";
-const AUTH_STORAGE_KEY = "companion_auth_token";
 
+// Auth is handled via HTTP-only session cookie (set by passkey auth flow).
+// No tokens stored in localStorage.
 function getAuthHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (!token) return {};
-  return { Authorization: `Bearer ${token}` };
+  return {};
 }
 
 function handle401(status: number): void {
   if (status === 401 && typeof window !== "undefined") {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    // Dynamic import to avoid circular dependency
+    // Session expired or revoked — trigger logout in store
     import("./store.js").then(({ useStore }) => {
       useStore.getState().logout();
     }).catch(() => {});
@@ -721,34 +718,14 @@ export async function createSessionStream(
  * The server returns the token if the request comes from 127.0.0.1/::1.
  * No auth header needed — this is a pre-auth endpoint.
  */
+/** @deprecated Auth is now passkey-based via session cookie. */
 export async function autoAuth(): Promise<string | null> {
-  try {
-    const res = await fetch(`${BASE}/auth/auto`);
-    if (res.ok) {
-      const data = await res.json() as { ok: boolean; token?: string };
-      if (data.ok && data.token) return data.token;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-export async function verifyAuthToken(token: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/auth/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return !!(data as { ok?: boolean }).ok;
-    }
-    return false;
-  } catch {
-    return false;
-  }
+/** @deprecated Auth is now passkey-based via session cookie. */
+export async function verifyAuthToken(_token: string): Promise<boolean> {
+  return false;
 }
 
 export const api = {

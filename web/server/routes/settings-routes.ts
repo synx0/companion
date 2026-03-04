@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChannel } from "../settings-manager.js";
+import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, getAnthropicAuthHeaders, type UpdateChannel } from "../settings-manager.js";
 import { linearCache } from "../linear-cache.js";
 
 export function registerSettingsRoutes(api: Hono): void {
@@ -164,15 +164,14 @@ export function registerSettingsRoutes(api: Hono): void {
       return c.json({ valid: false, error: "API key is required" }, 400);
     }
 
+    const authHeaders = getAnthropicAuthHeaders(apiKey);
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
 
     try {
       const res = await fetch("https://api.anthropic.com/v1/models", {
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
+        headers: authHeaders,
         signal: controller.signal,
       });
 

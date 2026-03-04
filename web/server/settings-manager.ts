@@ -89,7 +89,8 @@ function ensureLoaded(): void {
 
 function persist(): void {
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), "utf-8");
+  // mode 0o600: settings contain API keys — restrict to owner read/write only
+  writeFileSync(filePath, JSON.stringify(settings, null, 2), { encoding: "utf-8", mode: 0o600 });
 }
 
 export function getSettings(): CompanionSettings {
@@ -120,6 +121,19 @@ export function updateSettings(
   });
   persist();
   return { ...settings };
+}
+
+/**
+ * Returns the correct Anthropic auth headers for the given key.
+ * OAuth access tokens (oat01) require Authorization: Bearer.
+ * Standard API keys (api03) use x-api-key.
+ */
+export function getAnthropicAuthHeaders(apiKey: string): Record<string, string> {
+  const base = { "anthropic-version": "2023-06-01" };
+  if (apiKey.startsWith("sk-ant-oat01-")) {
+    return { ...base, "Authorization": `Bearer ${apiKey}` };
+  }
+  return { ...base, "x-api-key": apiKey };
 }
 
 export function _resetForTest(customPath?: string): void {

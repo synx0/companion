@@ -1,4 +1,4 @@
-import { getSettings, DEFAULT_ANTHROPIC_MODEL } from "./settings-manager.js";
+import { getSettings, DEFAULT_ANTHROPIC_MODEL, getAnthropicAuthHeaders } from "./settings-manager.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const AI_TIMEOUT_MS = 5_000;
@@ -176,8 +176,7 @@ export async function aiEvaluate(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        ...getAnthropicAuthHeaders(apiKey),
       },
       body: JSON.stringify({
         model,

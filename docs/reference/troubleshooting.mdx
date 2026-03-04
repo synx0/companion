@@ -34,19 +34,39 @@ the-companion --port 8080
 
 ## Authentication errors
 
-**Symptom**: Browser shows auth error or can't connect.
+**Symptom**: Browser shows "Unauthorized" or is stuck on the login screen.
 
-**Fix**: Regenerate the token:
+**Fix**: Authentication uses WebAuthn passkeys (Face ID / Touch ID). If you can't log in:
 
-```bash
-cd web && bun run generate-token --force
-```
+- Ensure a passkey has been registered. Generate a registration link:
+  ```bash
+  bun web/bin/companion-admin.ts create-invite
+  ```
+  Open the link in the browser where you want to register your biometric.
 
-Or set explicitly:
+- If all sessions are invalid (e.g. after a server reinstall), revoke and re-register:
+  ```bash
+  bun web/bin/companion-admin.ts revoke-sessions
+  bun web/bin/companion-admin.ts create-invite
+  ```
 
-```bash
-COMPANION_AUTH_TOKEN="my-token" the-companion
-```
+- To list or remove registered passkeys:
+  ```bash
+  bun web/bin/companion-admin.ts list-keys
+  bun web/bin/companion-admin.ts revoke-key <credential-id>
+  ```
+
+## Invalid API key
+
+**Symptom**: Settings page shows "Invalid API key" when verifying an Anthropic key. AI features (auto-naming, AI validation) don't work.
+
+**Causes and fixes**:
+
+- **Standard API key** (`sk-ant-api03-…`): Generated at [console.anthropic.com](https://console.anthropic.com). Paste directly into Settings → Anthropic API Key.
+
+- **OAuth access token** (`sk-ant-oat01-…`): Issued by Claude Code's login flow (`claude login`). These are accepted and verified via `Authorization: Bearer`. Note that OAuth tokens **expire** — if verification fails, re-run `claude login` to get a fresh token, then update the key in Settings.
+
+- **Wrong key format**: Ensure there are no leading/trailing spaces. The key must start with `sk-ant-`.
 
 ## CLI disconnects immediately
 
@@ -115,7 +135,7 @@ Check server logs: `the-companion logs`
 - Check the server is running
 - Refresh the page
 - Check for proxy or firewall blocking WebSocket connections
-- Verify the auth token matches (check browser console for 401 errors)
+- Check the browser console for 401 errors — if present, your passkey session may have expired; refresh the page to be prompted to sign in again
 
 ## Server logs
 

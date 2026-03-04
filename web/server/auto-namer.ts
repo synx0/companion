@@ -1,4 +1,4 @@
-import { DEFAULT_ANTHROPIC_MODEL, getSettings } from "./settings-manager.js";
+import { DEFAULT_ANTHROPIC_MODEL, getSettings, getAnthropicAuthHeaders } from "./settings-manager.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -39,8 +39,7 @@ export async function generateSessionTitle(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        ...getAnthropicAuthHeaders(apiKey),
       },
       body: JSON.stringify({
         model,

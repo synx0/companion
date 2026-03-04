@@ -1,10 +1,10 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "./store.js";
 import { connectSession } from "./ws.js";
 import { api } from "./api.js";
 import { capturePageView } from "./analytics.js";
 import { parseHash, navigateToSession } from "./utils/routing.js";
-import { LoginPage } from "./components/LoginPage.js";
+import { PasskeyLogin } from "./components/PasskeyLogin.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { ChatView } from "./components/ChatView.js";
 import { TopBar } from "./components/TopBar.js";
@@ -47,8 +47,44 @@ function useHash() {
 }
 
 export default function App() {
+  // ── Passkey auth gate ─────────────────────────────────────────────────────
   const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const setAuthToken = useStore((s) => s.setAuthToken);
+  const [authChecked, setAuthChecked] = useState(false);
   const darkMode = useStore((s) => s.darkMode);
+
+  // Verify session cookie is valid on mount by probing a protected endpoint.
+  // Only mark authenticated on an explicit 200 OK — server errors (5xx) must
+  // not silently pass the gate.
+  useEffect(() => {
+    fetch("/api/sessions", { credentials: "include" })
+      .then((res) => {
+        if (res.ok) setAuthToken("session");
+      })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, [setAuthToken]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode);
+  }, [darkMode]);
+
+  if (!authChecked) {
+    return (
+      <div className="h-[100dvh] flex items-center justify-center bg-cc-bg">
+        <div className="text-sm text-cc-muted">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <PasskeyLogin onAuthenticated={() => setAuthToken("session")} showRegisterLink />;
+  }
+
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const currentSessionId = useStore((s) => s.currentSessionId);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
@@ -76,10 +112,6 @@ export default function App() {
   useEffect(() => {
     capturePageView(hash || "#/");
   }, [hash]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode);
-  }, [darkMode]);
 
   // Migrate legacy "files" tab to "editor"
   useEffect(() => {
@@ -152,10 +184,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Auth gate: show login page when not authenticated
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
+  // Second auth gate (should not be reached after mount check above)
 
   if (route.page === "playground") {
     return <Suspense fallback={<LazyFallback />}><Playground /></Suspense>;

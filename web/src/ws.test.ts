@@ -103,7 +103,8 @@ describe("connectSession", () => {
   it("creates a WebSocket with the correct URL", () => {
     wsModule.connectSession("s1");
 
-    expect(lastWs.url).toBe("ws://localhost:3456/ws/browser/s1?token=");
+    // Auth is via HTTP-only session cookie — no token in URL
+    expect(lastWs.url).toBe("ws://localhost:3456/ws/browser/s1");
     expect(useStore.getState().connectionStatus.get("s1")).toBe("connecting");
   });
 

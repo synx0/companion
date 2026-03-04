@@ -7,7 +7,8 @@
   "author": "The Vibe Company",
   "bin": {
     "the-companion": "./bin/cli.ts",
-    "companion": "./bin/cli.ts"
+    "companion": "./bin/cli.ts",
+    "companion-admin": "./bin/companion-admin.ts"
   },
   "files": [
     "bin/",
@@ -37,7 +38,8 @@
     "test:watch": "vitest",
     "test:a11y": "vitest run --testNamePattern='axe accessibility|accessible names|aria-expanded'",
     "test:codex-contract": "vitest run server/codex-protocol-*.test.ts",
-    "generate-token": "bun bin/generate-token.ts"
+    "generate-token": "bun bin/generate-token.ts",
+    "admin": "bun bin/companion-admin.ts"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",
@@ -53,6 +55,9 @@
     "@codemirror/lang-xml": "^6.1.0",
     "@codemirror/lang-yaml": "^6.1.2",
     "@codemirror/view": "^6.39.15",
+    "@simplewebauthn/browser": "^13.2.2",
+    "@simplewebauthn/server": "^13.2.3",
+    "@simplewebauthn/types": "^12.0.0",
     "@uiw/react-codemirror": "^4.25.4",
     "croner": "^10.0.1",
     "diff": "^8.0.3",
