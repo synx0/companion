@@ -90,7 +90,14 @@ function resolveBranchDiffBases(repoRoot: string): string[] {
 export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }): void {
   // Allowed base directories for filesystem access.
   // Requests must target paths under the user's home directory or process cwd.
-  const allowedBases = () => opts?.allowedBases ?? [homedir(), process.cwd()];
+  // COMPANION_DEFAULT_HOME is included so isolated instances can access their workspace.
+  const allowedBases = () => {
+    if (opts?.allowedBases) return opts.allowedBases;
+    const bases = [homedir(), process.cwd()];
+    const defaultHome = process.env.COMPANION_DEFAULT_HOME?.trim();
+    if (defaultHome && !bases.includes(defaultHome)) bases.push(defaultHome);
+    return bases;
+  };
 
   api.get("/fs/list", async (c) => {
     const rawPath = c.req.query("path") || homedir();
@@ -120,6 +127,12 @@ export function registerFsRoutes(api: Hono, opts?: { allowedBases?: string[] }):
   });
 
   api.get("/fs/home", (c) => {
+    // COMPANION_DEFAULT_HOME overrides both the reported home and cwd.
+    // Used by isolated multi-instance setups so sessions default to a real workspace.
+    const defaultHome = process.env.COMPANION_DEFAULT_HOME?.trim();
+    if (defaultHome) {
+      return c.json({ home: defaultHome, cwd: defaultHome });
+    }
     const home = homedir();
     const cwd = process.cwd();
     // Only report cwd if the user launched companion from a real project directory

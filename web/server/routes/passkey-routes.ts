@@ -60,10 +60,18 @@ function getClientIp(req: Request): string {
   return "127.0.0.1";
 }
 
-/** Allowed RP IDs — localhost variants only (app is loopback-gated via iptables). */
-const ALLOWED_RP_IDS = new Set(["localhost", "127.0.0.1"]);
+/** Allowed hostnames — localhost variants only (app is loopback-gated via iptables). */
+const ALLOWED_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 const CUSTOM_DOMAIN = process.env.COMPANION_DOMAIN?.trim();
-if (CUSTOM_DOMAIN) ALLOWED_RP_IDS.add(CUSTOM_DOMAIN);
+if (CUSTOM_DOMAIN) ALLOWED_HOSTNAMES.add(CUSTOM_DOMAIN);
+
+/**
+ * Optional RP ID override — allows subdomains to share passkey credentials
+ * with a parent domain. E.g. COMPANION_RP_ID=syx0.one lets dev.syx0.one
+ * authenticate using passkeys registered on syx0.one.
+ * WebAuthn permits this: the RP ID must be a registrable suffix of the hostname.
+ */
+const RP_ID_OVERRIDE = process.env.COMPANION_RP_ID?.trim();
 
 /**
  * Derive RP ID and origin from the incoming request.
@@ -73,10 +81,13 @@ if (CUSTOM_DOMAIN) ALLOWED_RP_IDS.add(CUSTOM_DOMAIN);
  */
 function getRpInfo(req: Request): { rpID: string; origin: string } {
   const url = new URL(req.url);
-  const rpID = url.hostname;
-  if (!ALLOWED_RP_IDS.has(rpID)) {
-    throw new Error(`Untrusted RP ID: ${rpID}. Set COMPANION_DOMAIN env var to allow a custom domain.`);
+  const hostname = url.hostname;
+  if (!ALLOWED_HOSTNAMES.has(hostname)) {
+    throw new Error(`Untrusted hostname: ${hostname}. Set COMPANION_DOMAIN env var to allow a custom domain.`);
   }
+  // Use the RP ID override when set (for cross-subdomain passkey sharing),
+  // otherwise fall back to the request hostname.
+  const rpID = RP_ID_OVERRIDE || hostname;
   // When behind a reverse proxy (e.g. cloudflared), the server sees http:// but
   // the browser used https://. WebAuthn requires an exact origin match, so honour
   // the X-Forwarded-Proto header to reconstruct the real origin.
@@ -84,7 +95,7 @@ function getRpInfo(req: Request): { rpID: string; origin: string } {
     CUSTOM_DOMAIN
       ? (req.headers.get("X-Forwarded-Proto") ?? "https")
       : url.protocol.replace(":", "");
-  const origin = `${proto}://${rpID}`;
+  const origin = `${proto}://${hostname}`;
   return { rpID, origin };
 }
 
