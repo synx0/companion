@@ -85,6 +85,11 @@ export function createRoutes(
     // Hono merges sub-app middleware into the parent, so this middleware runs
     // for /api/passkey/* even though those routes are on a public sub-app.
     if (c.req.path.startsWith("/api/passkey/")) return next();
+    // Linear Agent webhook uses HMAC-SHA256 (not a session cookie).
+    if (c.req.path === "/api/linear/agent-webhook") return next();
+    // Linear OAuth callback is a redirect from Linear — user arrives with no session cookie.
+    // Protected by the OAuth state nonce (CSRF prevention).
+    if (c.req.path === "/api/linear/oauth/callback") return next();
     const cookieHeader = c.req.header("cookie") ?? "";
     const sessionToken = getSessionFromCookieHeader(cookieHeader);
     if (!verifySession(sessionToken)) {
