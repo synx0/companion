@@ -80,6 +80,10 @@ export interface AgentConfig {
       /** true = recurring cron, false = one-shot */
       recurring: boolean;
     };
+    /** Linear Agent Interaction SDK trigger (uses global OAuth app) */
+    linear?: {
+      enabled: boolean;
+    };
   };
 
   // ── Tracking ──
@@ -110,7 +114,7 @@ export interface AgentExecution {
   /** The agent ID that triggered this */
   agentId: string;
   /** Trigger type that initiated this execution */
-  triggerType: "manual" | "webhook" | "schedule";
+  triggerType: "manual" | "webhook" | "schedule" | "linear";
   /** When the execution started */
   startedAt: number;
   /** When the execution completed */

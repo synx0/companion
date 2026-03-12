@@ -129,8 +129,9 @@ interface AppState {
   taskPanelConfig: TaskPanelConfig;
   taskPanelConfigMode: boolean;
   homeResetKey: number;
+  publicUrl: string;
   editorTabEnabled: boolean;
-  activeTab: "chat" | "diff" | "terminal" | "processes" | "editor";
+  activeTab: "chat" | "diff" | "terminal" | "processes" | "editor" | "browser";
   chatTabReentryTickBySession: Map<string, number>;
   diffPanelSelectedFile: Map<string, string>;
 
@@ -145,6 +146,7 @@ interface AppState {
   toggleNotificationSound: () => void;
   setNotificationDesktop: (v: boolean) => void;
   toggleNotificationDesktop: () => void;
+  setPublicUrl: (url: string) => void;
   setSidebarOpen: (v: boolean) => void;
   setTaskPanelOpen: (open: boolean) => void;
   setTaskPanelConfigMode: (open: boolean) => void;
@@ -172,6 +174,7 @@ interface AppState {
   addPermission: (sessionId: string, perm: PermissionRequest) => void;
   removePermission: (sessionId: string, requestId: string) => void;
   addAiResolvedPermission: (sessionId: string, entry: { request: PermissionRequest; behavior: "allow" | "deny"; reason: string; timestamp: number }) => void;
+  clearAiResolvedPermissions: (sessionId: string) => void;
   setSessionAiValidation: (sessionId: string, settings: { aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null }) => void;
 
   // Task actions
@@ -224,7 +227,7 @@ interface AppState {
   setEditorTabEnabled: (enabled: boolean) => void;
 
   // Diff panel actions
-  setActiveTab: (tab: "chat" | "diff" | "terminal" | "processes" | "editor") => void;
+  setActiveTab: (tab: "chat" | "diff" | "terminal" | "processes" | "editor" | "browser") => void;
   markChatTabReentry: (sessionId: string) => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
@@ -369,6 +372,7 @@ export const useStore = create<AppState>((set) => ({
   taskPanelConfig: getInitialTaskPanelConfig(),
   taskPanelConfigMode: false,
   homeResetKey: 0,
+  publicUrl: "",
   editorTabEnabled: false,
   activeTab: "chat",
   chatTabReentryTickBySession: new Map(),
@@ -438,6 +442,7 @@ export const useStore = create<AppState>((set) => ({
       localStorage.setItem("cc-notification-desktop", String(next));
       return { notificationDesktop: next };
     }),
+  setPublicUrl: (url) => set({ publicUrl: url }),
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   setTaskPanelOpen: (open) => set({ taskPanelOpen: open }),
   setTaskPanelConfigMode: (open) => set({ taskPanelConfigMode: open }),
@@ -630,6 +635,13 @@ export const useStore = create<AppState>((set) => ({
       // Keep only the last 50 entries per session to avoid unbounded growth
       if (sessionEntries.length > 50) sessionEntries.splice(0, sessionEntries.length - 50);
       aiResolvedPermissions.set(sessionId, sessionEntries);
+      return { aiResolvedPermissions };
+    }),
+
+  clearAiResolvedPermissions: (sessionId) =>
+    set((s) => {
+      const aiResolvedPermissions = new Map(s.aiResolvedPermissions);
+      aiResolvedPermissions.delete(sessionId);
       return { aiResolvedPermissions };
     }),
 

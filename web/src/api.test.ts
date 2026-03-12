@@ -299,7 +299,7 @@ describe("updateEnv", () => {
 // ===========================================================================
 describe("settings", () => {
   it("sends GET to /api/settings", async () => {
-    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4.6", linearApiKeyConfigured: false };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6", linearApiKeyConfigured: false };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
     const result = await api.getSettings();
@@ -310,7 +310,7 @@ describe("settings", () => {
   });
 
   it("sends PUT to /api/settings", async () => {
-    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4.6", linearApiKeyConfigured: true };
+    const settings = { anthropicApiKeyConfigured: true, anthropicModel: "claude-sonnet-4-6", linearApiKeyConfigured: true };
     mockFetch.mockResolvedValueOnce(mockResponse(settings));
 
     await api.updateSettings({ anthropicApiKey: "sk-ant-key", linearApiKey: "lin_api_123" });
@@ -1868,5 +1868,70 @@ describe("del() error handling", () => {
       "api_request_failed",
       expect.objectContaining({ method: "DELETE", status: 409 }),
     );
+  });
+});
+
+// ===========================================================================
+// createLinearIssue — covers previously untested one-liner
+// ===========================================================================
+describe("createLinearIssue", () => {
+  it("sends POST to /api/linear/issues", async () => {
+    const input = { title: "Bug report", teamId: "team-1" };
+    const responseData = { ok: true, issue: { id: "ISS-1", ...input } };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseData));
+
+    const result = await api.createLinearIssue(input as Parameters<typeof api.createLinearIssue>[0]);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/issues");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual(responseData);
+  });
+});
+
+// ===========================================================================
+// listExecutions — covers URLSearchParams builder logic (lines 1142-1151)
+// ===========================================================================
+describe("listExecutions", () => {
+  it("sends GET to /api/executions without query params when no opts", async () => {
+    const responseData = { executions: [], total: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseData));
+
+    await api.listExecutions();
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/executions");
+  });
+
+  it("builds query string from all provided options", async () => {
+    const responseData = { executions: [], total: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseData));
+
+    await api.listExecutions({
+      agentId: "agent-1",
+      triggerType: "webhook",
+      status: "completed",
+      limit: 10,
+      offset: 20,
+    });
+
+    const [url] = mockFetch.mock.calls[0];
+    // Verify all params are present in the query string
+    expect(url).toContain("/api/executions?");
+    expect(url).toContain("agentId=agent-1");
+    expect(url).toContain("triggerType=webhook");
+    expect(url).toContain("status=completed");
+    expect(url).toContain("limit=10");
+    expect(url).toContain("offset=20");
+  });
+
+  it("only includes provided params in query string", async () => {
+    const responseData = { executions: [], total: 0 };
+    mockFetch.mockResolvedValueOnce(mockResponse(responseData));
+
+    await api.listExecutions({ status: "running" });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/executions?status=running");
   });
 });

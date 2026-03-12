@@ -3,6 +3,8 @@ import { api, type AgentInfo, type AgentExport, type AgentExecution, type McpSer
 import { getModelsForBackend, getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { timeAgo } from "../utils/time-ago.js";
+import { useStore } from "../store.js";
+import { PublicUrlBanner } from "./PublicUrlBanner.js";
 import type { Route } from "../utils/routing.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -48,6 +50,8 @@ interface AgentFormData {
   scheduleEnabled: boolean;
   scheduleExpression: string;
   scheduleRecurring: boolean;
+  // Linear Agent SDK trigger
+  linearEnabled: boolean;
 }
 
 const EMPTY_FORM: AgentFormData = {
@@ -72,6 +76,7 @@ const EMPTY_FORM: AgentFormData = {
   scheduleEnabled: false,
   scheduleExpression: "0 8 * * *",
   scheduleRecurring: true,
+  linearEnabled: false,
 };
 
 const CRON_PRESETS: { label: string; value: string }[] = [
@@ -171,8 +176,8 @@ function humanizeSchedule(expression: string, recurring: boolean): string {
   return expression;
 }
 
-function getWebhookUrl(agent: AgentInfo): string {
-  const base = window.location.origin;
+function getWebhookUrl(agent: AgentInfo, publicUrl: string): string {
+  const base = publicUrl || window.location.origin;
   return `${base}/api/agents/${encodeURIComponent(agent.id)}/webhook/${agent.triggers?.webhook?.secret || ""}`;
 }
 
@@ -189,6 +194,7 @@ function countAdvancedFeatures(form: AgentFormData): number {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function AgentsPage({ route }: Props) {
+  const publicUrl = useStore((s) => s.publicUrl);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"list" | "edit">("list");
@@ -199,7 +205,13 @@ export function AgentsPage({ route }: Props) {
   const [runInputAgent, setRunInputAgent] = useState<AgentInfo | null>(null);
   const [runInput, setRunInput] = useState("");
   const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+  const [linearOAuthConfigured, setLinearOAuthConfigured] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if Linear OAuth is configured (for Agent SDK trigger visibility)
+  useEffect(() => {
+    api.getLinearOAuthStatus().then((s) => setLinearOAuthConfigured(s.configured)).catch(() => {});
+  }, []);
 
   // Load agents
   const loadAgents = useCallback(async () => {
@@ -262,6 +274,7 @@ export function AgentsPage({ route }: Props) {
       scheduleEnabled: agent.triggers?.schedule?.enabled ?? false,
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
       scheduleRecurring: agent.triggers?.schedule?.recurring ?? true,
+      linearEnabled: agent.triggers?.linear?.enabled ?? false,
     });
     setError("");
     setView("edit");
@@ -311,6 +324,7 @@ export function AgentsPage({ route }: Props) {
             expression: form.scheduleExpression,
             recurring: form.scheduleRecurring,
           },
+          linear: { enabled: form.linearEnabled },
         },
       };
 
@@ -401,7 +415,7 @@ export function AgentsPage({ route }: Props) {
   }
 
   function copyWebhookUrl(agent: AgentInfo) {
-    const url = getWebhookUrl(agent);
+    const url = getWebhookUrl(agent, publicUrl);
     navigator.clipboard.writeText(url).then(() => {
       setCopiedWebhook(agent.id);
       setTimeout(() => setCopiedWebhook(null), 2000);
@@ -425,10 +439,12 @@ export function AgentsPage({ route }: Props) {
       form={form}
       setForm={setForm}
       editingId={editingId}
+      publicUrl={publicUrl}
       error={error}
       saving={saving}
       onSave={handleSave}
       onCancel={cancelEdit}
+      linearOAuthConfigured={linearOAuthConfigured}
     />;
   }
 
@@ -470,6 +486,8 @@ export function AgentsPage({ route }: Props) {
           </div>
         )}
 
+        <PublicUrlBanner publicUrl={publicUrl} />
+
         {/* Agent Cards */}
         {loading ? (
           <div className="text-sm text-cc-muted">Loading...</div>
@@ -487,6 +505,7 @@ export function AgentsPage({ route }: Props) {
               <AgentCard
                 key={agent.id}
                 agent={agent}
+                publicUrl={publicUrl}
                 onEdit={() => startEdit(agent)}
                 onDelete={() => handleDelete(agent.id)}
                 onToggle={() => handleToggle(agent.id)}
@@ -494,7 +513,7 @@ export function AgentsPage({ route }: Props) {
                 onExport={() => handleExport(agent)}
                 onCopyWebhook={() => copyWebhookUrl(agent)}
                 onRegenerateSecret={() => handleRegenerateSecret(agent.id)}
-                copiedWebhook={copiedWebhook === agent.id}
+                copiedWebhook={copiedWebhook}
               />
             ))}
           </div>
@@ -545,6 +564,7 @@ export function AgentsPage({ route }: Props) {
 
 function AgentCard({
   agent,
+  publicUrl,
   onEdit,
   onDelete,
   onToggle,
@@ -555,6 +575,7 @@ function AgentCard({
   copiedWebhook,
 }: {
   agent: AgentInfo;
+  publicUrl: string;
   onEdit: () => void;
   onDelete: () => void;
   onToggle: () => void;
@@ -562,7 +583,7 @@ function AgentCard({
   onExport: () => void;
   onCopyWebhook: () => void;
   onRegenerateSecret: () => void;
-  copiedWebhook: boolean;
+  copiedWebhook: string | null;
 }) {
   const triggers: string[] = ["Manual"];
   if (agent.triggers?.webhook?.enabled) triggers.push("Webhook");
@@ -572,6 +593,7 @@ function AgentCard({
       agent.triggers.schedule.recurring,
     ));
   }
+  if (agent.triggers?.linear?.enabled) triggers.push("Linear Agent");
 
   return (
     <div className="rounded-xl border border-cc-border bg-cc-card p-4 hover:border-cc-primary/30 transition-colors">
@@ -661,7 +683,7 @@ function AgentCard({
               className="px-2 py-0.5 text-[10px] rounded-full bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors cursor-pointer"
               title="Copy webhook URL"
             >
-              {copiedWebhook ? "Copied!" : "Copy URL"}
+              {copiedWebhook === agent.id ? "Copied!" : "Copy URL"}
             </button>
           )}
         </div>
@@ -681,18 +703,22 @@ function AgentEditor({
   form,
   setForm,
   editingId,
+  publicUrl,
   error,
   saving,
   onSave,
   onCancel,
+  linearOAuthConfigured,
 }: {
   form: AgentFormData;
   setForm: (f: AgentFormData | ((prev: AgentFormData) => AgentFormData)) => void;
   editingId: string | null;
+  publicUrl: string;
   error: string;
   saving: boolean;
   onSave: () => void;
   onCancel: () => void;
+  linearOAuthConfigured: boolean;
 }) {
   const models = getModelsForBackend(form.backendType);
   const modes = getAgentModesForBackend(form.backendType);
@@ -1170,12 +1196,34 @@ function AgentEditor({
                 </svg>
                 Schedule
               </button>
+
+              {/* Linear Agent SDK toggle pill (only shown when OAuth is configured) */}
+              {linearOAuthConfigured && (
+                <button
+                  onClick={() => updateField("linearEnabled", !form.linearEnabled)}
+                  className={form.linearEnabled ? pillActive : pillDefault}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-60">
+                    <path d="M3 1a1 1 0 00-1 1v12a1 1 0 001 1h10a1 1 0 001-1V2a1 1 0 00-1-1H3zm1 2h8v2H4V3zm0 4h5v2H4V7zm0 4h8v2H4v-2z" />
+                  </svg>
+                  Linear Agent
+                </button>
+              )}
+
             </div>
 
             {/* Webhook helper */}
             {form.webhookEnabled && (
               <p className="text-[10px] text-cc-muted mt-2">
                 A unique URL will be generated after saving. POST to it with <code className="px-1 py-0.5 rounded bg-cc-hover">{`{"input": "..."}`}</code>.
+              </p>
+            )}
+
+            {/* Linear Agent helper */}
+            {form.linearEnabled && (
+              <p className="text-[10px] text-cc-muted mt-2">
+                This agent will respond to @mentions in Linear via the Agent Interaction SDK. Configure the OAuth app in{" "}
+                <a href="#/settings/linear" className="text-cc-primary underline">Linear Settings</a>.
               </p>
             )}
 
@@ -1230,6 +1278,7 @@ function AgentEditor({
                 )}
               </div>
             )}
+
           </section>
 
           {/* ── Advanced (collapsible) ── */}

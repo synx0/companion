@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock settings-manager before importing the module under test
 vi.mock("./settings-manager.js", () => ({
-  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4.6",
+  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6",
   getSettings: vi.fn(),
 }));
 
@@ -62,6 +62,9 @@ function createMockSession(overrides = {}): Session {
     lastAckSeq: 0,
     processedClientMessageIds: [],
     processedClientMessageIdSet: new Set(),
+    recentCLIMessageHashes: [],
+    recentCLIMessageHashSet: new Set(),
+    lastCliActivityTs: Date.now(),
     ...overrides,
   } as Session;
 }
@@ -92,6 +95,9 @@ function createMockDeps(overrides = {}): CodexAttachDeps {
     onCLISessionId: vi.fn(),
     onFirstTurnCompleted: vi.fn(),
     autoNamingAttempted: new Set<string>(),
+    assistantMessageListeners: new Map(),
+    resultListeners: new Map(),
+    onCLIRelaunchNeeded: vi.fn(),
     ...overrides,
   };
 }
@@ -112,7 +118,7 @@ describe("attachCodexAdapterHandlers", () => {
     // Default: AI validation disabled — existing tests should not be affected
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -120,10 +126,16 @@ describe("attachCodexAdapterHandlers", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -185,7 +197,112 @@ describe("attachCodexAdapterHandlers", () => {
     expect(deps.persistSession).toHaveBeenCalledWith(session);
   });
 
+  it("session_init preserves pre-populated commands/skills when adapter sends empty arrays", () => {
+    // When prePopulateCommands has set commands/skills on the session before
+    // the Codex adapter sends session_init with empty arrays, the pre-populated
+    // data should be preserved (Codex does not provide its own commands/skills).
+    session.state.slash_commands = ["pre-cmd-1", "pre-cmd-2"];
+    session.state.skills = ["pre-skill"];
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "session_init",
+      session: {
+        session_id: "test-session",
+        backend_type: "codex",
+        model: "o3-pro",
+        cwd: "/home/user/project",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        is_containerized: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+    });
+
+    // Pre-populated data should survive the Codex session_init merge
+    expect(session.state.slash_commands).toEqual(["pre-cmd-1", "pre-cmd-2"]);
+    expect(session.state.skills).toEqual(["pre-skill"]);
+    // Other fields should still be updated
+    expect(session.state.model).toBe("o3-pro");
+    expect(session.state.cwd).toBe("/home/user/project");
+  });
+
+  it("session_init allows overwriting commands/skills when adapter sends non-empty arrays", () => {
+    // If a future Codex version sends actual commands/skills, they should
+    // overwrite the pre-populated data.
+    session.state.slash_commands = ["pre-cmd"];
+    session.state.skills = ["pre-skill"];
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "session_init",
+      session: {
+        session_id: "test-session",
+        backend_type: "codex",
+        model: "o3-pro",
+        cwd: "/home/user/project",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: ["codex-cmd"],
+        skills: ["codex-skill"],
+        total_cost_usd: 0,
+        num_turns: 0,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        is_containerized: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+    });
+
+    // Non-empty arrays from the adapter should overwrite pre-populated data
+    expect(session.state.slash_commands).toEqual(["codex-cmd"]);
+    expect(session.state.skills).toEqual(["codex-skill"]);
+  });
+
   // ── session_update ──────────────────────────────────────────────────────
+
+  it("session_update preserves pre-populated commands/skills when update has empty arrays", () => {
+    // Same preservation logic applies to session_update messages.
+    session.state.slash_commands = ["pre-cmd"];
+    session.state.skills = ["pre-skill"];
+
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onBrowserMessage", {
+      type: "session_update",
+      session: { model: "gpt-4.1", slash_commands: [], skills: [] },
+    });
+
+    expect(session.state.slash_commands).toEqual(["pre-cmd"]);
+    expect(session.state.skills).toEqual(["pre-skill"]);
+    expect(session.state.model).toBe("gpt-4.1");
+  });
 
   it("session_update merges partial state and sets backend_type to codex", () => {
     // session_update should spread the partial session fields into state,
@@ -772,6 +889,70 @@ describe("attachCodexAdapterHandlers", () => {
     });
   });
 
+  it("onDisconnect triggers auto-relaunch when browsers are still connected", () => {
+    // When the transport drops mid-conversation and browsers are still connected,
+    // the session should be auto-relaunched instead of leaving users with a dead session.
+    session.codexAdapter = adapter as unknown as CodexAdapter;
+    // Simulate a connected browser
+    const fakeBrowserWs = {} as any;
+    session.browserSockets.add(fakeBrowserWs);
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onDisconnect", undefined);
+
+    expect(deps.onCLIRelaunchNeeded).toHaveBeenCalledWith("test-session");
+  });
+
+  it("onDisconnect does NOT auto-relaunch when no browsers are connected", () => {
+    // If no browsers are watching, don't waste resources relaunching — the relaunch
+    // will happen when a browser reconnects via handleBrowserOpen.
+    session.codexAdapter = adapter as unknown as CodexAdapter;
+    expect(session.browserSockets.size).toBe(0);
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+    adapter._trigger("onDisconnect", undefined);
+
+    expect(deps.onCLIRelaunchNeeded).not.toHaveBeenCalled();
+  });
+
+  it("onDisconnect does NOT auto-relaunch when callback is null", () => {
+    // When the relaunch callback is not configured, disconnect should still work
+    // without errors.
+    session.codexAdapter = adapter as unknown as CodexAdapter;
+    const fakeBrowserWs = {} as any;
+    session.browserSockets.add(fakeBrowserWs);
+    const depsNoRelaunch = createMockDeps({ onCLIRelaunchNeeded: null });
+    attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, depsNoRelaunch);
+
+    // Should not throw
+    adapter._trigger("onDisconnect", undefined);
+
+    expect(session.codexAdapter).toBeNull();
+  });
+
+  it("stale adapter disconnect does NOT trigger auto-relaunch", () => {
+    // When a stale adapter disconnects after being replaced, it should not
+    // trigger a relaunch (the new adapter is already active).
+    const oldAdapter = createMockAdapter();
+    const newAdapter = createMockAdapter();
+    const fakeBrowserWs = {} as any;
+    session.browserSockets.add(fakeBrowserWs);
+
+    session.codexAdapter = oldAdapter as unknown as CodexAdapter;
+    attachCodexAdapterHandlers("test-session", session, oldAdapter as unknown as CodexAdapter, deps);
+
+    // Relaunch replaces the adapter
+    session.codexAdapter = newAdapter as unknown as CodexAdapter;
+    attachCodexAdapterHandlers("test-session", session, newAdapter as unknown as CodexAdapter, deps);
+    (deps.onCLIRelaunchNeeded as ReturnType<typeof vi.fn>).mockClear();
+
+    // Old adapter fires disconnect
+    oldAdapter._trigger("onDisconnect", undefined);
+
+    // Should NOT trigger relaunch since the old adapter was stale
+    expect(deps.onCLIRelaunchNeeded).not.toHaveBeenCalled();
+  });
+
   // ── Pending message flushing ────────────────────────────────────────────
 
   it("flushes pending messages to adapter on attach", () => {
@@ -867,7 +1048,7 @@ describe("attachCodexAdapterHandlers", () => {
     function enableAiValidation() {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -875,10 +1056,16 @@ describe("attachCodexAdapterHandlers", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+        linearOAuthClientId: "",
+        linearOAuthClientSecret: "",
+        linearOAuthWebhookSecret: "",
+        linearOAuthAccessToken: "",
+        linearOAuthRefreshToken: "",
         editorTabEnabled: false,
         aiValidationEnabled: true,
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: true,
+        publicUrl: "",
         updateChannel: "stable",
         updatedAt: 0,
       });
@@ -1034,7 +1221,7 @@ describe("attachCodexAdapterHandlers", () => {
       // without calling validatePermission at all.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1042,10 +1229,16 @@ describe("attachCodexAdapterHandlers", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+        linearOAuthClientId: "",
+        linearOAuthClientSecret: "",
+        linearOAuthWebhookSecret: "",
+        linearOAuthAccessToken: "",
+        linearOAuthRefreshToken: "",
         editorTabEnabled: false,
         aiValidationEnabled: false,  // disabled
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: true,
+        publicUrl: "",
         updateChannel: "stable",
         updatedAt: 0,
       });
@@ -1071,7 +1264,7 @@ describe("attachCodexAdapterHandlers", () => {
       // the AI — fall through to normal manual flow.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "",  // empty
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1079,10 +1272,16 @@ describe("attachCodexAdapterHandlers", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+        linearOAuthClientId: "",
+        linearOAuthClientSecret: "",
+        linearOAuthWebhookSecret: "",
+        linearOAuthAccessToken: "",
+        linearOAuthRefreshToken: "",
         editorTabEnabled: false,
         aiValidationEnabled: true,
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: true,
+        publicUrl: "",
         updateChannel: "stable",
         updatedAt: 0,
       });
@@ -1173,7 +1372,7 @@ describe("attachCodexAdapterHandlers", () => {
       // should fall through to manual review instead of auto-approving.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1181,10 +1380,16 @@ describe("attachCodexAdapterHandlers", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+        linearOAuthClientId: "",
+        linearOAuthClientSecret: "",
+        linearOAuthWebhookSecret: "",
+        linearOAuthAccessToken: "",
+        linearOAuthRefreshToken: "",
         editorTabEnabled: false,
         aiValidationEnabled: true,
         aiValidationAutoApprove: false,  // disabled
         aiValidationAutoDeny: true,
+        publicUrl: "",
         updateChannel: "stable",
         updatedAt: 0,
       });
@@ -1294,7 +1499,7 @@ describe("attachCodexAdapterHandlers", () => {
       // should fall through to manual review instead of auto-denying.
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         anthropicApiKey: "test-api-key",
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         linearApiKey: "",
         linearAutoTransition: false,
         linearAutoTransitionStateId: "",
@@ -1302,10 +1507,16 @@ describe("attachCodexAdapterHandlers", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+        linearOAuthClientId: "",
+        linearOAuthClientSecret: "",
+        linearOAuthWebhookSecret: "",
+        linearOAuthAccessToken: "",
+        linearOAuthRefreshToken: "",
         editorTabEnabled: false,
         aiValidationEnabled: true,
         aiValidationAutoApprove: true,
         aiValidationAutoDeny: false,  // disabled
+        publicUrl: "",
         updateChannel: "stable",
         updatedAt: 0,
       });
@@ -1334,6 +1545,125 @@ describe("attachCodexAdapterHandlers", () => {
           ai_validation: { verdict: "dangerous", reason: "Recursive delete", ruleBasedOnly: true },
         }),
       });
+    });
+  });
+
+  // ── Per-session listeners (chat relay) ──────────────────────────────────
+
+  describe("per-session assistant/result listeners", () => {
+    it("invokes assistantMessageListeners when assistant message arrives", () => {
+      // Chat relay relies on per-session listeners to forward agent responses
+      // to external platforms. The Codex path must invoke these just like the
+      // Claude Code path does.
+      const listener = vi.fn();
+      deps.assistantMessageListeners.set("test-session", new Set([listener]));
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      const assistantMsg: BrowserIncomingMessage = {
+        type: "assistant",
+        message: {
+          id: "msg-listener",
+          type: "message",
+          role: "assistant",
+          model: "o3-pro",
+          content: [{ type: "text", text: "Hello from Codex" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+        parent_tool_use_id: null,
+        timestamp: 1700000000000,
+      };
+
+      adapter._trigger("onBrowserMessage", assistantMsg);
+
+      expect(listener).toHaveBeenCalledOnce();
+      // The listener should receive the message with timestamp
+      expect(listener.mock.calls[0][0]).toMatchObject({
+        type: "assistant",
+        timestamp: 1700000000000,
+      });
+    });
+
+    it("invokes resultListeners when result message arrives", () => {
+      // Result listeners signal turn completion so chat relay can post
+      // accumulated text back to the platform.
+      const listener = vi.fn();
+      deps.resultListeners.set("test-session", new Set([listener]));
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      const resultMsg: BrowserIncomingMessage = {
+        type: "result",
+        data: {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: undefined,
+          duration_ms: 100,
+          duration_api_ms: 80,
+          num_turns: 1,
+          total_cost_usd: 0.01,
+          stop_reason: "end_turn",
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          uuid: "result-listener-1",
+          session_id: "test-session",
+        },
+      };
+
+      adapter._trigger("onBrowserMessage", resultMsg);
+
+      expect(listener).toHaveBeenCalledOnce();
+      expect(listener.mock.calls[0][0]).toMatchObject({ type: "result" });
+    });
+
+    it("does not invoke listeners for a different session", () => {
+      // Listeners registered for "other-session" should not fire when
+      // messages arrive for "test-session".
+      const listener = vi.fn();
+      deps.assistantMessageListeners.set("other-session", new Set([listener]));
+
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      adapter._trigger("onBrowserMessage", {
+        type: "assistant",
+        message: {
+          id: "msg-other",
+          type: "message",
+          role: "assistant",
+          model: "o3-pro",
+          content: [{ type: "text", text: "Hello" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+        parent_tool_use_id: null,
+        timestamp: Date.now(),
+      });
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("does not throw when no listeners are registered", () => {
+      // When no listeners are registered for the session, the handler
+      // should not throw (Map.get returns undefined, optional chaining).
+      attachCodexAdapterHandlers("test-session", session, adapter as unknown as CodexAdapter, deps);
+
+      expect(() => {
+        adapter._trigger("onBrowserMessage", {
+          type: "assistant",
+          message: {
+            id: "msg-no-listener",
+            type: "message",
+            role: "assistant",
+            model: "o3-pro",
+            content: [{ type: "text", text: "Hello" }],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          },
+          parent_tool_use_id: null,
+          timestamp: Date.now(),
+        });
+      }).not.toThrow();
     });
   });
 });

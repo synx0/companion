@@ -157,6 +157,8 @@ export interface LaunchOptions {
   resumeSessionAt?: string;
   /** Fork a new Claude session when resuming from prior context. */
   forkSession?: boolean;
+  /** Optional system prompt to inject into Codex sessions (e.g. Linear context). */
+  systemPrompt?: string;
 }
 
 /**
@@ -513,6 +515,7 @@ export class CliLauncher {
     if (options.resumeSessionId) {
       args.push("--resume", options.resumeSessionId);
     }
+
     args.push("-p", "");
 
     let spawnCmd: string[];
@@ -545,7 +548,10 @@ export class CliLauncher {
       spawnCwd = undefined; // cwd is set inside the container via -w at creation
     } else {
       // Host-based spawn (original behavior)
-      spawnCmd = [binary, ...args];
+      // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn;
+      // they must be invoked via cmd.exe /c.
+      const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
+      spawnCmd = isCmdScript ? ["cmd.exe", "/c", binary, ...args] : [binary, ...args];
       spawnEnv = {
         ...process.env,
         CLAUDECODE: undefined,
@@ -745,7 +751,8 @@ export class CliLauncher {
       const binaryDir = resolve(binary, "..");
       const siblingNode = join(binaryDir, "node");
       const enrichedPath = getEnrichedPath();
-      const spawnPath = [binaryDir, ...enrichedPath.split(":")].filter(Boolean).join(":");
+      const pathSep = process.platform === "win32" ? ";" : ":";
+      const spawnPath = [binaryDir, ...enrichedPath.split(pathSep)].filter(Boolean).join(pathSep);
 
       if (existsSync(siblingNode)) {
         let codexScript: string;
@@ -756,7 +763,9 @@ export class CliLauncher {
         }
         spawnCmd = [siblingNode, codexScript, ...args];
       } else {
-        spawnCmd = [binary, ...args];
+        // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn
+        const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
+        spawnCmd = isCmdScript ? ["cmd.exe", "/c", binary, ...args] : [binary, ...args];
       }
 
       spawnEnv = {
@@ -827,6 +836,7 @@ export class CliLauncher {
       threadId: info.cliSessionId,
       sandbox: options.codexSandbox,
       recorder: this.recorder ?? undefined,
+      systemPrompt: options.systemPrompt,
       killProcess: async () => {
         try {
           proxyProc.kill("SIGTERM");
@@ -971,7 +981,8 @@ export class CliLauncher {
       const binaryDir = resolve(binary, "..");
       const siblingNode = join(binaryDir, "node");
       const enrichedPath = getEnrichedPath();
-      const spawnPath = [binaryDir, ...enrichedPath.split(":")].filter(Boolean).join(":");
+      const pathSep = process.platform === "win32" ? ";" : ":";
+      const spawnPath = [binaryDir, ...enrichedPath.split(pathSep)].filter(Boolean).join(pathSep);
 
       if (existsSync(siblingNode)) {
         let codexScript: string;
@@ -982,7 +993,9 @@ export class CliLauncher {
         }
         spawnCmd = [siblingNode, codexScript, ...args];
       } else {
-        spawnCmd = [binary, ...args];
+        // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn
+        const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
+        spawnCmd = isCmdScript ? ["cmd.exe", "/c", binary, ...args] : [binary, ...args];
       }
 
       spawnEnv = {
@@ -1027,6 +1040,7 @@ export class CliLauncher {
       threadId: info.cliSessionId,
       sandbox: options.codexSandbox,
       recorder: this.recorder ?? undefined,
+      systemPrompt: options.systemPrompt,
     });
 
     // Handle init errors — mark session as exited so UI shows failure.

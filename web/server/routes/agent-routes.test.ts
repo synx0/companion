@@ -593,3 +593,4 @@ describe("POST /api/agents/:id/webhook/:secret", () => {
     expect(executor.executeAgentManually).toHaveBeenCalledWith("webhook-agent", "plain text input");
   });
 });
+

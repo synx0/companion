@@ -20,6 +20,12 @@ export interface CodexAttachDeps {
   onCLISessionId: ((sessionId: string, cliSessionId: string) => void) | null;
   onFirstTurnCompleted: ((sessionId: string, firstUserMessage: string) => void) | null;
   autoNamingAttempted: Set<string>;
+  /** Per-session listeners for assistant messages (used by chat relay). */
+  assistantMessageListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
+  /** Per-session listeners for result messages (used by chat relay). */
+  resultListeners: Map<string, Set<(msg: BrowserIncomingMessage) => void>>;
+  /** Callback to request auto-relaunch when the backend dies while browsers are connected. */
+  onCLIRelaunchNeeded: ((sessionId: string) => void) | null;
 }
 
 export function attachCodexAdapterHandlers(
@@ -30,11 +36,27 @@ export function attachCodexAdapterHandlers(
 ): void {
   adapter.onBrowserMessage((msg) => {
     if (msg.type === "session_init") {
-      session.state = { ...session.state, ...msg.session, backend_type: "codex" };
+      // Preserve pre-populated commands/skills when adapter sends empty arrays
+      // (Codex does not provide its own commands/skills)
+      const { slash_commands, skills, ...rest } = msg.session;
+      session.state = {
+        ...session.state,
+        ...rest,
+        ...(slash_commands?.length ? { slash_commands } : {}),
+        ...(skills?.length ? { skills } : {}),
+        backend_type: "codex",
+      };
       deps.refreshGitInfo(session, { notifyPoller: true });
       deps.persistSession(session);
     } else if (msg.type === "session_update") {
-      session.state = { ...session.state, ...msg.session, backend_type: "codex" };
+      const { slash_commands, skills, ...rest } = msg.session;
+      session.state = {
+        ...session.state,
+        ...rest,
+        ...(slash_commands?.length ? { slash_commands } : {}),
+        ...(skills?.length ? { skills } : {}),
+        backend_type: "codex",
+      };
       deps.refreshGitInfo(session, { notifyPoller: true });
       deps.persistSession(session);
     } else if (msg.type === "status_change") {
@@ -43,11 +65,22 @@ export function attachCodexAdapterHandlers(
     }
 
     if (msg.type === "assistant") {
-      session.messageHistory.push({ ...msg, timestamp: msg.timestamp || Date.now() });
+      const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
+      session.messageHistory.push(assistantMsg);
       deps.persistSession(session);
+      // Invoke per-session listeners for chat relay
+      deps.assistantMessageListeners.get(sessionId)?.forEach((cb) => {
+        try { cb(assistantMsg); } catch (err) { console.error("[ws-bridge-codex] Assistant listener error:", err); }
+      });
     } else if (msg.type === "result") {
       session.messageHistory.push(msg);
       deps.persistSession(session);
+      // Invoke per-session listeners for chat relay
+      deps.resultListeners.get(sessionId)?.forEach((cb) => {
+        try {
+          Promise.resolve(cb(msg)).catch((err) => console.error("[ws-bridge-codex] Async result listener error:", err));
+        } catch (err) { console.error("[ws-bridge-codex] Result listener error:", err); }
+      });
     }
 
     if (msg.type === "assistant") {
@@ -127,6 +160,13 @@ export function attachCodexAdapterHandlers(
     deps.persistSession(session);
     console.log(`[ws-bridge] Codex adapter disconnected for session ${sessionId}`);
     deps.broadcastToBrowsers(session, { type: "cli_disconnected" });
+
+    // Auto-relaunch if browsers are still connected (don't leave users staring
+    // at a dead session when the transport drops mid-conversation).
+    if (session.browserSockets.size > 0 && deps.onCLIRelaunchNeeded) {
+      console.log(`[ws-bridge] Auto-relaunching Codex for session ${sessionId} (${session.browserSockets.size} browser(s) connected)`);
+      deps.onCLIRelaunchNeeded(sessionId);
+    }
   });
 
   if (session.pendingMessages.length > 0) {

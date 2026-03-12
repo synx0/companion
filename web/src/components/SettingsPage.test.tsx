@@ -17,6 +17,7 @@ interface MockStoreState {
   notificationSound: boolean;
   notificationDesktop: boolean;
   diffBase: string;
+  publicUrl: string;
   updateInfo: {
     currentVersion: string;
     latestVersion: string | null;
@@ -29,6 +30,7 @@ interface MockStoreState {
   toggleNotificationSound: ReturnType<typeof vi.fn>;
   setNotificationDesktop: ReturnType<typeof vi.fn>;
   setDiffBase: ReturnType<typeof vi.fn>;
+  setPublicUrl: ReturnType<typeof vi.fn>;
   setUpdateInfo: ReturnType<typeof vi.fn>;
   setUpdateOverlayActive: ReturnType<typeof vi.fn>;
   setEditorTabEnabled: ReturnType<typeof vi.fn>;
@@ -42,11 +44,13 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     notificationSound: true,
     notificationDesktop: false,
     diffBase: "last-commit",
+    publicUrl: "",
     updateInfo: null,
     toggleDarkMode: vi.fn(),
     toggleNotificationSound: vi.fn(),
     setNotificationDesktop: vi.fn(),
     setDiffBase: vi.fn(),
+    setPublicUrl: vi.fn(),
     setUpdateInfo: vi.fn(),
     setUpdateOverlayActive: vi.fn(),
     setEditorTabEnabled: vi.fn(),
@@ -102,21 +106,23 @@ beforeEach(() => {
   window.location.hash = "#/settings";
   mockApi.getSettings.mockResolvedValue({
     anthropicApiKeyConfigured: true,
-    anthropicModel: "claude-sonnet-4.6",
+    anthropicModel: "claude-sonnet-4-6",
     linearApiKeyConfigured: false,
     linearAutoTransition: false,
     linearAutoTransitionStateName: "",
     editorTabEnabled: false,
     updateChannel: "stable",
+    publicUrl: "",
   });
   mockApi.updateSettings.mockResolvedValue({
     anthropicApiKeyConfigured: true,
-    anthropicModel: "claude-sonnet-4.6",
+    anthropicModel: "claude-sonnet-4-6",
     linearApiKeyConfigured: false,
     linearAutoTransition: false,
     linearAutoTransitionStateName: "",
     editorTabEnabled: false,
     updateChannel: "stable",
+    publicUrl: "",
   });
   mockApi.forceCheckForUpdate.mockResolvedValue({
     currentVersion: "0.22.1",
@@ -148,7 +154,7 @@ describe("SettingsPage", () => {
 
     expect(mockApi.getSettings).toHaveBeenCalledTimes(1);
     await screen.findByText("Anthropic key configured");
-    expect(screen.getByDisplayValue("claude-sonnet-4.6")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("claude-sonnet-4-6")).toBeInTheDocument();
   });
 
   // When a key is already configured, the input shows masked dots (••••) to
@@ -169,7 +175,7 @@ describe("SettingsPage", () => {
   it("shows not configured status", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: false,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -212,7 +218,7 @@ describe("SettingsPage", () => {
     expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
   });
 
-  it("falls back model to claude-sonnet-4.6 when blank", async () => {
+  it("falls back model to claude-sonnet-4-6 when blank", async () => {
     render(<SettingsPage />);
     await screen.findByText("Anthropic key configured");
     fireEvent.change(screen.getByLabelText("Anthropic Model"), {
@@ -223,7 +229,7 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(mockApi.updateSettings).toHaveBeenCalledWith({
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         editorTabEnabled: false,
       });
     });
@@ -257,7 +263,7 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(mockApi.updateSettings).toHaveBeenCalledWith({
-        anthropicModel: "claude-sonnet-4.6",
+        anthropicModel: "claude-sonnet-4-6",
         editorTabEnabled: true,
       });
     });
@@ -322,11 +328,18 @@ describe("SettingsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    // Both the Anthropic "Save" and Webhooks "Save Public URL" buttons share the
+    // `saving` state, so both show "Saving..." while the request is in flight.
+    // We check that the submit-type button (Anthropic form) is disabled.
+    const savingButtons = screen.getAllByRole("button", { name: "Saving..." });
+    expect(savingButtons.length).toBeGreaterThanOrEqual(1);
+    const submitSavingBtn = savingButtons.find((b) => b.getAttribute("type") === "submit");
+    expect(submitSavingBtn).toBeDefined();
+    expect(submitSavingBtn).toBeDisabled();
 
     resolveSave?.({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -454,6 +467,7 @@ describe("SettingsPage", () => {
     await screen.findByText("Anthropic key configured");
 
     expect(document.getElementById("general")).toBeInTheDocument();
+    expect(document.getElementById("webhooks")).toBeInTheDocument();
     expect(document.getElementById("authentication")).toBeInTheDocument();
     expect(document.getElementById("notifications")).toBeInTheDocument();
     expect(document.getElementById("anthropic")).toBeInTheDocument();
@@ -700,7 +714,7 @@ describe("SettingsPage", () => {
   it("disables AI Validation toggle when Anthropic key is NOT configured", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: false,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -725,7 +739,7 @@ describe("SettingsPage", () => {
   it("calls updateSettings with aiValidationEnabled when toggle is clicked", async () => {
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -751,7 +765,7 @@ describe("SettingsPage", () => {
     // Return settings with aiValidationEnabled: true so sub-toggles render
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -774,7 +788,7 @@ describe("SettingsPage", () => {
   it("hides auto-approve and auto-deny sub-toggles when AI Validation is disabled", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -797,7 +811,7 @@ describe("SettingsPage", () => {
   it("calls updateSettings with aiValidationAutoApprove when auto-approve is toggled", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -809,7 +823,7 @@ describe("SettingsPage", () => {
     });
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -835,7 +849,7 @@ describe("SettingsPage", () => {
   it("calls updateSettings with aiValidationAutoDeny when auto-deny is toggled", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -847,7 +861,7 @@ describe("SettingsPage", () => {
     });
     mockApi.updateSettings.mockResolvedValue({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -922,7 +936,7 @@ describe("SettingsPage", () => {
   it("shows prerelease description when channel is prerelease", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -940,7 +954,7 @@ describe("SettingsPage", () => {
   it("switches to prerelease channel and re-checks updates", async () => {
     mockApi.updateSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
@@ -979,5 +993,111 @@ describe("SettingsPage", () => {
 
     // Should not have called updateSettings since stable is already selected
     expect(mockApi.updateSettings).not.toHaveBeenCalled();
+  });
+
+  // ─── Webhooks section tests ──────────────────────────────────
+
+  // The Webhooks category should appear in the sidebar navigation so users
+  // can quickly jump to the webhook configuration section.
+  it("includes Webhooks in category navigation", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    // Each category appears in both desktop sidebar and mobile nav (jsdom renders both)
+    const webhookButtons = screen.getAllByRole("button", { name: "Webhooks" });
+    expect(webhookButtons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // The Public URL input should render inside the Webhooks section with the
+  // correct type ("url") and an accessible label. When no publicUrl is set,
+  // the fallback text should show the current window origin.
+  it("renders Public URL input in Webhooks section with fallback text", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    // The section heading should be present
+    expect(document.getElementById("webhooks")).toBeInTheDocument();
+
+    // The input should be accessible via its aria-label
+    const urlInput = screen.getByLabelText("Public URL") as HTMLInputElement;
+    expect(urlInput).toBeInTheDocument();
+    expect(urlInput.type).toBe("url");
+    expect(urlInput.id).toBe("public-url");
+
+    // When publicUrl is empty, the fallback text should show window.location.origin
+    expect(screen.getByText(`Fallback: ${window.location.origin}`)).toBeInTheDocument();
+
+    // The "Save Public URL" button should be present
+    expect(screen.getByRole("button", { name: "Save Public URL" })).toBeInTheDocument();
+  });
+
+  // When a publicUrl is set (returned from getSettings), the status text should
+  // show "Using: {url}" instead of the fallback origin.
+  it("shows 'Using: {url}' status when publicUrl is set", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "https://my-companion.example.com",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    expect(screen.getByText("Using: https://my-companion.example.com")).toBeInTheDocument();
+  });
+
+  // Entering a URL and clicking "Save Public URL" should call api.updateSettings
+  // with the trimmed publicUrl value and update the store via setPublicUrl.
+  it("saves public URL via api.updateSettings when Save Public URL is clicked", async () => {
+    mockApi.updateSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      editorTabEnabled: false,
+      updateChannel: "stable",
+      publicUrl: "https://my-companion.example.com",
+    });
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const urlInput = screen.getByLabelText("Public URL");
+    fireEvent.change(urlInput, { target: { value: "  https://my-companion.example.com  " } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Public URL" }));
+
+    // Should call updateSettings with trimmed publicUrl
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({
+        publicUrl: "https://my-companion.example.com",
+      });
+    });
+
+    // After save, the store's setPublicUrl should be called with the returned value
+    await waitFor(() => {
+      expect(mockState.setPublicUrl).toHaveBeenCalledWith("https://my-companion.example.com");
+    });
+  });
+
+  // Axe accessibility scan for the Webhooks section to ensure it meets
+  // WCAG standards (labels, roles, contrast, etc.).
+  it("passes axe accessibility checks for the Webhooks section", async () => {
+    const { axe } = await import("vitest-axe");
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const webhooksSection = document.getElementById("webhooks");
+    expect(webhooksSection).toBeInTheDocument();
+
+    const results = await axe(webhooksSection!);
+    expect(results).toHaveNoViolations();
   });
 });

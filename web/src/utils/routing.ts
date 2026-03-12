@@ -6,6 +6,7 @@ export type Route =
   | { page: "settings" }
   | { page: "integrations" }
   | { page: "integration-linear" }
+  | { page: "integration-tailscale" }
   | { page: "prompts" }
   | { page: "terminal" }
   | { page: "environments" }
@@ -13,6 +14,7 @@ export type Route =
   | { page: "scheduled" }
   | { page: "agents" }
   | { page: "agent-detail"; agentId: string }
+  | { page: "runs" }
   | { page: "playground" };
 
 const SESSION_PREFIX = "#/session/";
@@ -34,6 +36,7 @@ export function parseHash(hash: string): Route {
   if (hash === "#/settings") return { page: "settings" };
   if (hash === "#/integrations") return { page: "integrations" };
   if (hash === "#/integrations/linear") return { page: "integration-linear" };
+  if (hash === "#/integrations/tailscale") return { page: "integration-tailscale" };
   if (hash === "#/prompts") return { page: "prompts" };
   if (hash === "#/terminal") return { page: "terminal" };
   if (hash === "#/environments") return { page: "environments" };
@@ -41,6 +44,7 @@ export function parseHash(hash: string): Route {
   // #/scheduled redirects to #/agents (cron absorbed into agents)
   if (hash === "#/scheduled") return { page: "agents" };
   if (hash === "#/agents") return { page: "agents" };
+  if (hash === "#/runs") return { page: "runs" };
   if (hash === "#/playground") return { page: "playground" };
 
   if (hash.startsWith(AGENT_PREFIX)) {

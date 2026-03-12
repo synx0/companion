@@ -67,10 +67,10 @@ vi.mock("./session-names.js", () => ({
 }));
 
 vi.mock("./settings-manager.js", () => ({
-  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4.6",
+  DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6",
   getSettings: vi.fn(() => ({
     anthropicApiKey: "",
-    anthropicModel: "claude-sonnet-4.6",
+    anthropicModel: "claude-sonnet-4-6",
     linearApiKey: "",
     linearAutoTransition: false,
     linearAutoTransitionStateId: "",
@@ -78,16 +78,22 @@ vi.mock("./settings-manager.js", () => ({
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+    linearOAuthClientId: "",
+    linearOAuthClientSecret: "",
+    linearOAuthWebhookSecret: "",
+    linearOAuthAccessToken: "",
+    linearOAuthRefreshToken: "",
     editorTabEnabled: false,
     aiValidationEnabled: false,
     aiValidationAutoApprove: true,
     aiValidationAutoDeny: true,
+    publicUrl: "",
     updateChannel: "stable",
     updatedAt: 0,
   })),
   updateSettings: vi.fn((patch) => ({
     anthropicApiKey: patch.anthropicApiKey ?? "",
-    anthropicModel: patch.anthropicModel ?? "claude-sonnet-4.6",
+    anthropicModel: patch.anthropicModel ?? "claude-sonnet-4-6",
     linearApiKey: patch.linearApiKey ?? "",
     linearAutoTransition: patch.linearAutoTransition ?? false,
     linearAutoTransitionStateId: patch.linearAutoTransitionStateId ?? "",
@@ -95,10 +101,16 @@ vi.mock("./settings-manager.js", () => ({
     linearArchiveTransition: patch.linearArchiveTransition ?? false,
     linearArchiveTransitionStateId: patch.linearArchiveTransitionStateId ?? "",
     linearArchiveTransitionStateName: patch.linearArchiveTransitionStateName ?? "",
+    linearOAuthClientId: patch.linearOAuthClientId ?? "",
+    linearOAuthClientSecret: patch.linearOAuthClientSecret ?? "",
+    linearOAuthWebhookSecret: patch.linearOAuthWebhookSecret ?? "",
+    linearOAuthAccessToken: patch.linearOAuthAccessToken ?? "",
+    linearOAuthRefreshToken: patch.linearOAuthRefreshToken ?? "",
     editorTabEnabled: patch.editorTabEnabled ?? false,
     aiValidationEnabled: patch.aiValidationEnabled ?? false,
     aiValidationAutoApprove: patch.aiValidationAutoApprove ?? true,
     aiValidationAutoDeny: patch.aiValidationAutoDeny ?? true,
+    publicUrl: patch.publicUrl ?? "",
     updateChannel: patch.updateChannel ?? "stable",
     updatedAt: Date.now(),
   })),
@@ -140,6 +152,20 @@ vi.mock("./linear-project-manager.js", () => ({
     updatedAt: Date.now(),
   })),
   removeMapping: vi.fn(() => false),
+  _resetForTest: vi.fn(),
+}));
+
+// Mock linear-connections to isolate from the file-based connection store.
+// resolveApiKey returns a valid key by default; tests that need "no key"
+// override it to return null.
+vi.mock("./linear-connections.js", () => ({
+  listConnections: vi.fn(() => []),
+  getConnection: vi.fn(() => null),
+  getDefaultConnection: vi.fn(() => null),
+  createConnection: vi.fn(),
+  updateConnection: vi.fn(),
+  deleteConnection: vi.fn(),
+  resolveApiKey: vi.fn(() => ({ apiKey: "lin_api_123", connectionId: "test-conn" })),
   _resetForTest: vi.fn(),
 }));
 
@@ -239,6 +265,7 @@ import * as gitUtils from "./git-utils.js";
 import * as sessionNames from "./session-names.js";
 import * as settingsManager from "./settings-manager.js";
 import * as linearProjectManager from "./linear-project-manager.js";
+import { resolveApiKey } from "./linear-connections.js";
 import { containerManager } from "./container-manager.js";
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
@@ -267,7 +294,9 @@ function createMockBridge() {
     getAllSessions: vi.fn(() => []),
     getCodexRateLimits: vi.fn(() => null),
     markContainerized: vi.fn(),
+    prePopulateCommands: vi.fn(),
     broadcastNameUpdate: vi.fn(),
+    injectSystemPrompt: vi.fn(),
   } as any;
 }
 
@@ -297,6 +326,8 @@ let terminalManager: { getInfo: ReturnType<typeof vi.fn>; spawn: ReturnType<type
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Re-establish default return value for resolveApiKey after clearAllMocks
+  vi.mocked(resolveApiKey).mockReturnValue({ apiKey: "lin_api_123", connectionId: "test-conn" });
   mockDiscoverClaudeSessions.mockReturnValue([]);
   mockGetClaudeSessionHistoryPage.mockReturnValue(null);
   mockUpdateCheckerState.currentVersion = "0.22.1";
@@ -979,6 +1010,45 @@ describe("POST /api/sessions/create", () => {
     expect(removeSpy).toHaveBeenCalled();
     expect(launcher.launch).not.toHaveBeenCalled();
   });
+
+  it("passes resumeSessionAt and forkSession to launcher when provided", async () => {
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cwd: "/test",
+        resumeSessionAt: "existing-session-id",
+        forkSession: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(launcher.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeSessionAt: "existing-session-id",
+        forkSession: true,
+      }),
+    );
+  });
+
+  it("passes resumeSessionAt without forkSession when only resumeSessionAt is provided", async () => {
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cwd: "/test",
+        resumeSessionAt: "existing-session-id",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(launcher.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeSessionAt: "existing-session-id",
+        forkSession: false,
+      }),
+    );
+  });
 });
 
 describe("GET /api/sessions", () => {
@@ -1523,7 +1593,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     mockGetLinearIssue.mockReturnValue(linkedIssue);
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1531,10 +1601,16 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateId: "",
       linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -1546,9 +1622,9 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    // Should have resolved backlog state from team states
-    expect(mockFetchLinearTeamStates).toHaveBeenCalledWith("lin_test_key");
-    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-backlog", "lin_test_key");
+    // Should have resolved backlog state from team states (uses resolveApiKey)
+    expect(mockFetchLinearTeamStates).toHaveBeenCalledWith("lin_api_123");
+    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-backlog", "lin_api_123", "test-conn");
     expect(json.linearTransition).toBeDefined();
     expect(json.linearTransition.ok).toBe(true);
     // Session should still be archived
@@ -1559,7 +1635,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     mockGetLinearIssue.mockReturnValue(linkedIssue);
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1567,10 +1643,16 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
       linearArchiveTransition: true,
       linearArchiveTransitionStateId: "state-custom",
       linearArchiveTransitionStateName: "Review",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -1580,7 +1662,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
       body: JSON.stringify({ linearTransition: "configured" }),
     });
     expect(res.status).toBe(200);
-    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-custom", "lin_test_key");
+    expect(mockTransitionLinearIssue).toHaveBeenCalledWith("issue-1", "state-custom", "lin_api_123", "test-conn");
   });
 
   it("archives successfully even when transition fails", async () => {
@@ -1588,7 +1670,7 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
     mockTransitionLinearIssue.mockResolvedValue({ ok: false, error: "Linear API error" });
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1596,10 +1678,16 @@ describe("POST /api/sessions/:id/archive — Linear transition", () => {
       linearArchiveTransition: false,
       linearArchiveTransitionStateId: "",
       linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -1665,7 +1753,7 @@ describe("GET /api/sessions/:id/archive-info", () => {
     });
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_test_key",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -1673,10 +1761,16 @@ describe("GET /api/sessions/:id/archive-info", () => {
       linearArchiveTransition: true,
       linearArchiveTransitionStateId: "state-custom",
       linearArchiveTransitionStateName: "Review",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2031,7 +2125,7 @@ describe("GET /api/settings", () => {
   it("returns settings status without exposing the key", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "or-secret",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2039,10 +2133,16 @@ describe("GET /api/settings", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 123,
     });
@@ -2053,16 +2153,20 @@ describe("GET /api/settings", () => {
     const json = await res.json();
     expect(json).toEqual({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
+      linearConnectionCount: 0,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
     linearArchiveTransition: false,
     linearArchiveTransitionStateName: "",
+      linearOAuthConfigured: false,
+      linearOAuthCredentialsSaved: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
     });
   });
@@ -2078,10 +2182,16 @@ describe("GET /api/settings", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 123,
     });
@@ -2094,16 +2204,53 @@ describe("GET /api/settings", () => {
       anthropicApiKeyConfigured: false,
       anthropicModel: "openai/gpt-4o-mini",
       linearApiKeyConfigured: true,
+      linearConnectionCount: 0,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
     linearArchiveTransition: false,
     linearArchiveTransitionStateName: "",
+      linearOAuthConfigured: false,
+      linearOAuthCredentialsSaved: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
     });
+  });
+
+  // Verifies publicUrl is included in GET response when set to a non-empty value
+  it("includes publicUrl in response when configured", async () => {
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      anthropicApiKey: "",
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
+      linearArchiveTransition: false,
+      linearArchiveTransitionStateId: "",
+      linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+      publicUrl: "https://example.com",
+      updateChannel: "stable",
+      updatedAt: 100,
+    });
+
+    const res = await app.request("/api/settings", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.publicUrl).toBe("https://example.com");
   });
 });
 
@@ -2111,7 +2258,7 @@ describe("PUT /api/settings", () => {
   it("updates settings", async () => {
     vi.mocked(settingsManager.updateSettings).mockReturnValue({
       anthropicApiKey: "new-key",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2119,10 +2266,16 @@ describe("PUT /api/settings", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 456,
     });
@@ -2144,6 +2297,9 @@ describe("PUT /api/settings", () => {
       linearArchiveTransition: undefined,
       linearArchiveTransitionStateId: undefined,
       linearArchiveTransitionStateName: undefined,
+      linearOAuthClientId: undefined,
+      linearOAuthClientSecret: undefined,
+      linearOAuthWebhookSecret: undefined,
       editorTabEnabled: undefined,
       aiValidationEnabled: undefined,
       aiValidationAutoApprove: undefined,
@@ -2153,16 +2309,20 @@ describe("PUT /api/settings", () => {
     const json = await res.json();
     expect(json).toEqual({
       anthropicApiKeyConfigured: true,
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKeyConfigured: false,
+      linearConnectionCount: 0,
       linearAutoTransition: false,
       linearAutoTransitionStateName: "",
     linearArchiveTransition: false,
     linearArchiveTransitionStateName: "",
+      linearOAuthConfigured: false,
+      linearOAuthCredentialsSaved: false,
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
     });
   });
@@ -2170,7 +2330,7 @@ describe("PUT /api/settings", () => {
   it("trims key and falls back to default model for blank value", async () => {
     vi.mocked(settingsManager.updateSettings).mockReturnValue({
       anthropicApiKey: "trimmed-key",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_trimmed",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2178,10 +2338,16 @@ describe("PUT /api/settings", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 789,
     });
@@ -2195,7 +2361,7 @@ describe("PUT /api/settings", () => {
     expect(res.status).toBe(200);
     expect(settingsManager.updateSettings).toHaveBeenCalledWith({
       anthropicApiKey: "trimmed-key",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_trimmed",
       linearAutoTransition: undefined,
       linearAutoTransitionStateId: undefined,
@@ -2215,10 +2381,16 @@ describe("PUT /api/settings", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 999,
     });
@@ -2300,6 +2472,76 @@ describe("PUT /api/settings", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json).toEqual({ error: "updateChannel must be 'stable' or 'prerelease'" });
+  });
+
+  // Verifies that PUT /api/settings accepts a publicUrl string and passes
+  // it (trimmed, trailing-slash-stripped) to updateSettings
+  it("accepts and saves publicUrl string", async () => {
+    vi.mocked(settingsManager.updateSettings).mockReturnValue({
+      anthropicApiKey: "",
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
+      linearArchiveTransition: false,
+      linearArchiveTransitionStateId: "",
+      linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
+      editorTabEnabled: false,
+      aiValidationEnabled: false,
+      aiValidationAutoApprove: true,
+      aiValidationAutoDeny: true,
+      publicUrl: "https://my-server.com",
+      updateChannel: "stable",
+      updatedAt: 500,
+    });
+
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicUrl: "  https://my-server.com///  " }),
+    });
+
+    expect(res.status).toBe(200);
+    // The route trims whitespace and strips trailing slashes before calling updateSettings
+    expect(settingsManager.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publicUrl: "https://my-server.com",
+      }),
+    );
+    const json = await res.json();
+    expect(json.publicUrl).toBe("https://my-server.com");
+  });
+
+  // Rejects non-string publicUrl values with a 400 error
+  it("returns 400 for non-string publicUrl", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicUrl: 123 }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "publicUrl must be a string" });
+  });
+
+  // Rejects publicUrl values that are not valid http/https URLs
+  it("returns 400 for publicUrl with invalid scheme", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicUrl: "ftp://bad-scheme.com" }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "publicUrl must be a valid http/https URL" });
   });
 
   it("returns 400 when no settings fields are provided", async () => {
@@ -2412,7 +2654,7 @@ describe("GET /api/linear/issues", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2420,24 +2662,31 @@ describe("GET /api/linear/issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/issues?query=auth", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("proxies Linear issue search results with branchName", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2445,10 +2694,16 @@ describe("GET /api/linear/issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2516,7 +2771,7 @@ describe("GET /api/linear/issues", () => {
     // items before currently started ones.
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2524,10 +2779,16 @@ describe("GET /api/linear/issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2602,7 +2863,7 @@ describe("GET /api/linear/issues", () => {
     // the response maps it to an empty string so the frontend can generate a slug
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2610,10 +2871,16 @@ describe("GET /api/linear/issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2653,7 +2920,7 @@ describe("GET /api/linear/connection", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2661,24 +2928,31 @@ describe("GET /api/linear/connection", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/connection", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("returns viewer/team info when connection works", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2686,10 +2960,16 @@ describe("GET /api/linear/connection", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2726,7 +3006,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("skips when auto-transition is disabled", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "state-123",
@@ -2734,10 +3014,16 @@ describe("POST /api/linear/issues/:id/transition", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2756,7 +3042,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("skips when no target state is configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "",
@@ -2764,10 +3050,16 @@ describe("POST /api/linear/issues/:id/transition", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2785,7 +3077,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-123",
@@ -2793,13 +3085,20 @@ describe("POST /api/linear/issues/:id/transition", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/issues/issue-123/transition", {
       method: "POST",
@@ -2808,14 +3107,14 @@ describe("POST /api/linear/issues/:id/transition", () => {
     });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   // Happy path: uses configured stateId to update the issue directly
   it("transitions issue to configured state", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-doing",
@@ -2823,10 +3122,16 @@ describe("POST /api/linear/issues/:id/transition", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2880,7 +3185,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
   it("returns 502 when issue update fails", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: true,
       linearAutoTransitionStateId: "state-doing",
@@ -2888,10 +3193,16 @@ describe("POST /api/linear/issues/:id/transition", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -2924,7 +3235,7 @@ describe("GET /api/linear/projects", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2932,24 +3243,31 @@ describe("GET /api/linear/projects", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/projects", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("returns project list from Linear API", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -2957,10 +3275,16 @@ describe("GET /api/linear/projects", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -3005,7 +3329,7 @@ describe("GET /api/linear/project-issues", () => {
   it("returns 400 when linear key is not configured", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3013,24 +3337,31 @@ describe("GET /api/linear/project-issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
+    vi.mocked(resolveApiKey).mockReturnValue(null);
 
     const res = await app.request("/api/linear/project-issues?projectId=p1", { method: "GET" });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json).toEqual({ error: "Linear API key is not configured" });
+    expect(json).toEqual({ error: "No Linear connection configured" });
   });
 
   it("returns recent non-done issues for a project", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3038,10 +3369,16 @@ describe("GET /api/linear/project-issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -3101,7 +3438,7 @@ describe("GET /api/linear/project-issues", () => {
     // UI issue lists should present queued/backlog work first, followed by started work.
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       anthropicApiKey: "",
-      anthropicModel: "claude-sonnet-4.6",
+      anthropicModel: "claude-sonnet-4-6",
       linearApiKey: "lin_api_123",
       linearAutoTransition: false,
       linearAutoTransitionStateId: "",
@@ -3109,10 +3446,16 @@ describe("GET /api/linear/project-issues", () => {
     linearArchiveTransition: false,
     linearArchiveTransitionStateId: "",
     linearArchiveTransitionStateName: "",
+      linearOAuthClientId: "",
+      linearOAuthClientSecret: "",
+      linearOAuthWebhookSecret: "",
+      linearOAuthAccessToken: "",
+      linearOAuthRefreshToken: "",
       editorTabEnabled: false,
       aiValidationEnabled: false,
       aiValidationAutoApprove: true,
       aiValidationAutoDeny: true,
+      publicUrl: "",
       updateChannel: "stable",
       updatedAt: 0,
     });
@@ -4817,5 +5160,458 @@ describe("POST /api/sessions/:id/processes/system/:pid/kill", () => {
     expect(data.ok).toBe(true);
 
     killSpy.mockRestore();
+  });
+});
+
+// ── Browser preview endpoints ─────────────────────────────────────────────────
+
+describe("POST /api/sessions/:id/browser/start", () => {
+  it("returns host mode for non-container sessions", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    const res = await app.request("/api/sessions/s1/browser/start", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      available: true,
+      mode: "host",
+    });
+  });
+
+  it("returns unavailable when container is missing", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue(undefined);
+
+    const res = await app.request("/api/sessions/s1/browser/start", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      available: false,
+      mode: "container",
+    });
+    expect(json.message).toContain("Container not found");
+  });
+
+  it("returns unavailable when Xvfb binary is missing", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "cid-1",
+      name: "companion-s1",
+      image: "the-companion:latest",
+      portMappings: [{ containerPort: 6080, hostPort: 49200 }],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
+    // Xvfb not found, websockify found
+    vi.spyOn(containerManager, "hasBinaryInContainer").mockImplementation(
+      (_cid: string, bin: string) => bin !== "Xvfb",
+    );
+
+    const res = await app.request("/api/sessions/s1/browser/start", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      available: false,
+      mode: "container",
+    });
+    expect(json.message).toContain("Xvfb and noVNC");
+  });
+
+  it("starts display stack and returns proxied URL for container session", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "cid-1",
+      name: "companion-s1",
+      image: "the-companion:latest",
+      portMappings: [{ containerPort: 6080, hostPort: 49200 }],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
+    vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
+    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
+
+    const res = await app.request("/api/sessions/s1/browser/start", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      available: true,
+      mode: "container",
+    });
+    // URL should be a proxied path through the companion server
+    expect(json.url).toContain("/api/sessions/s1/browser/proxy/vnc.html");
+    expect(json.url).toContain("autoconnect=true");
+    expect(json.url).toContain("path=ws/novnc/s1");
+    // Should have called execInContainer for the display stack and Chrome
+    expect(execSpy).toHaveBeenCalledTimes(2);
+    fetchSpy.mockRestore();
+  });
+
+  it("returns unavailable when noVNC polling times out", { timeout: 15_000 }, async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "cid-1",
+      name: "companion-s1",
+      image: "the-companion:latest",
+      portMappings: [{ containerPort: 6080, hostPort: 49200 }],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
+    vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
+    vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+    // Simulate noVNC never becoming ready — all fetches throw
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("connection refused"));
+
+    const res = await app.request("/api/sessions/s1/browser/start", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      available: false,
+      mode: "container",
+    });
+    expect(json.message).toContain("timed out");
+    fetchSpy.mockRestore();
+  });
+
+  it("rejects file:// URL scheme in browser/start", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "cid-1",
+      name: "companion-s1",
+      image: "the-companion:latest",
+      portMappings: [{ containerPort: 6080, hostPort: 49200 }],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    vi.spyOn(containerManager, "hasBinaryInContainer").mockReturnValue(true);
+    vi.spyOn(containerManager, "isContainerAlive").mockReturnValue("running");
+    vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+
+    const res = await app.request("/api/sessions/s1/browser/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "file:///etc/passwd" }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({ available: false });
+    expect(json.message).toContain("http://");
+  });
+});
+
+describe("POST /api/sessions/:id/browser/navigate", () => {
+  it("returns 404 when session not found", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+
+    const res = await app.request("/api/sessions/s1/browser/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://localhost:3000" }),
+    });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 for non-container session", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    const res = await app.request("/api/sessions/s1/browser/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://localhost:3000" }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects file:// URL scheme", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+
+    const res = await app.request("/api/sessions/s1/browser/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "file:///etc/passwd" }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("http://");
+  });
+
+  it("navigates Chrome to the given URL", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "cid-1",
+      name: "companion-s1",
+      image: "the-companion:latest",
+      portMappings: [],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    const execSpy = vi.spyOn(containerManager, "execInContainer").mockReturnValue("");
+
+    const res = await app.request("/api/sessions/s1/browser/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://localhost:3000" }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({ ok: true, url: "http://localhost:3000" });
+    expect(execSpy).toHaveBeenCalledWith(
+      "cid-1",
+      expect.arrayContaining(["sh", "-c"]),
+      10_000,
+    );
+  });
+});
+
+describe("GET /api/sessions/:id/browser/proxy/*", () => {
+  it("returns 404 when session not found", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+
+    const res = await app.request("/api/sessions/s1/browser/proxy/vnc.html");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 for non-container session", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    const res = await app.request("/api/sessions/s1/browser/proxy/vnc.html");
+
+    expect(res.status).toBe(400);
+  });
+
+  it("proxies request to container noVNC server", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+      containerId: "cid-1",
+    });
+    vi.spyOn(containerManager, "getContainer").mockReturnValue({
+      containerId: "cid-1",
+      name: "companion-s1",
+      image: "the-companion:latest",
+      portMappings: [{ containerPort: 6080, hostPort: 49200 }],
+      hostCwd: "/repo",
+      containerCwd: "/workspace",
+      state: "running",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>noVNC</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+
+    const res = await app.request("/api/sessions/s1/browser/proxy/vnc.html?autoconnect=true");
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toBe("<html>noVNC</html>");
+    // fetch should have been called with the container's mapped port
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("http://127.0.0.1:49200/vnc.html"),
+    );
+    fetchSpy.mockRestore();
+  });
+});
+
+describe("GET /api/sessions/:id/browser/host-proxy/:port/*", () => {
+  it("returns 404 when session not found", async () => {
+    launcher.getSession.mockReturnValue(undefined);
+
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/3000/index.html");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 for invalid port", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/99999/index.html");
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Invalid port");
+  });
+
+  it("returns 400 for non-numeric port", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/abc/index.html");
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Invalid port");
+  });
+
+  // Security: Hono's router resolves literal ".." and "%2e%2e" before matching,
+  // returning 404 automatically. Our handler adds a defense-in-depth check for
+  // real HTTP servers where encoded traversal may bypass router normalization.
+  it("Hono blocks path traversal at router level (returns 404 not route match)", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    // Both literal and encoded ".." are resolved by Hono's router before matching
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/3000/%2e%2e/%2e%2e/etc/passwd");
+    expect(res.status).toBe(404);
+  });
+
+  // Security: block proxying to the companion server itself (would bypass remote auth)
+  it("rejects proxying to the companion server port", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+
+    // Default dev port is 3457
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/3457/api/sessions");
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Cannot proxy to the companion server");
+  });
+
+  it("proxies request to localhost on the given port", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>App</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/3000/index.html");
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toBe("<html>App</html>");
+    // fetch should target 127.0.0.1 with the specified port and sub-path
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:3000/index.html",
+      expect.objectContaining({ redirect: "follow" }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it("forwards query string to upstream", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("ok", { status: 200 }),
+    );
+
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/5173/assets/main.js?v=123");
+
+    expect(res.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://127.0.0.1:5173/assets/main.js?v=123",
+      expect.objectContaining({ redirect: "follow" }),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  // Error message should be generic to avoid leaking internal network info
+  it("returns generic 502 when upstream is unreachable", async () => {
+    launcher.getSession.mockReturnValue({
+      sessionId: "s1",
+      state: "running",
+      cwd: "/repo",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("Connection refused"),
+    );
+
+    const res = await app.request("/api/sessions/s1/browser/host-proxy/9999/");
+
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    // Should NOT leak the raw error message (e.g. "Connection refused 127.0.0.1:9999")
+    expect(json.error).toBe("Proxy failed: upstream unreachable");
+    fetchSpy.mockRestore();
   });
 });

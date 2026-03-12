@@ -15,6 +15,7 @@ import { UpdateBanner } from "./components/UpdateBanner.js";
 import { SessionLaunchOverlay } from "./components/SessionLaunchOverlay.js";
 import { SessionTerminalDock } from "./components/SessionTerminalDock.js";
 import { SessionEditorPane } from "./components/SessionEditorPane.js";
+import { SessionBrowserPane } from "./components/SessionBrowserPane.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
 
 // Lazy-loaded route-level pages (not needed for initial render)
@@ -22,11 +23,13 @@ const Playground = lazy(() => import("./components/Playground.js").then((m) => (
 const SettingsPage = lazy(() => import("./components/SettingsPage.js").then((m) => ({ default: m.SettingsPage })));
 const IntegrationsPage = lazy(() => import("./components/IntegrationsPage.js").then((m) => ({ default: m.IntegrationsPage })));
 const LinearSettingsPage = lazy(() => import("./components/LinearSettingsPage.js").then((m) => ({ default: m.LinearSettingsPage })));
+const TailscalePage = lazy(() => import("./components/TailscalePage.js").then((m) => ({ default: m.TailscalePage })));
 const PromptsPage = lazy(() => import("./components/PromptsPage.js").then((m) => ({ default: m.PromptsPage })));
 const EnvManager = lazy(() => import("./components/EnvManager.js").then((m) => ({ default: m.EnvManager })));
 const DockerBuilderPage = lazy(() => import("./components/DockerBuilderPage.js").then((m) => ({ default: m.DockerBuilderPage })));
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
+const RunsPage = lazy(() => import("./components/RunsPage.js").then((m) => ({ default: m.RunsPage })));
 const TerminalPage = lazy(() => import("./components/TerminalPage.js").then((m) => ({ default: m.TerminalPage })));
 const ProcessPanel = lazy(() => import("./components/ProcessPanel.js").then((m) => ({ default: m.ProcessPanel })));
 
@@ -102,11 +105,13 @@ function AuthenticatedApp() {
   const isPromptsPage = route.page === "prompts";
   const isIntegrationsPage = route.page === "integrations";
   const isLinearIntegrationPage = route.page === "integration-linear";
+  const isTailscaleIntegrationPage = route.page === "integration-tailscale";
   const isTerminalPage = route.page === "terminal";
   const isEnvironmentsPage = route.page === "environments";
   const isDockerBuilderPage = route.page === "docker-builder";
   const isScheduledPage = route.page === "scheduled";
   const isAgentsPage = route.page === "agents" || route.page === "agent-detail";
+  const isRunsPage = route.page === "runs";
   const isSessionView = route.page === "session" || route.page === "home";
 
   useEffect(() => {
@@ -184,7 +189,12 @@ function AuthenticatedApp() {
     return () => clearInterval(interval);
   }, []);
 
-  // Second auth gate (should not be reached after mount check above)
+  // Load publicUrl from settings on mount (used for webhook URL generation)
+  useEffect(() => {
+    api.getSettings().then((s) => {
+      if (s.publicUrl) useStore.getState().setPublicUrl(s.publicUrl);
+    }).catch(() => {});
+  }, []);
 
   if (route.page === "playground") {
     return <Suspense fallback={<LazyFallback />}><Playground /></Suspense>;
@@ -241,6 +251,12 @@ function AuthenticatedApp() {
             </div>
           )}
 
+          {isTailscaleIntegrationPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><TailscalePage embedded /></Suspense>
+            </div>
+          )}
+
           {isTerminalPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><TerminalPage /></Suspense>
@@ -271,11 +287,19 @@ function AuthenticatedApp() {
             </div>
           )}
 
+          {isRunsPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><RunsPage /></Suspense>
+            </div>
+          )}
+
           {isSessionView && (
             <>
               <div className="absolute inset-0">
                 {currentSessionId ? (
-                  activeTab === "terminal"
+                  activeTab === "browser"
+                    ? <SessionBrowserPane sessionId={currentSessionId} />
+                    : activeTab === "terminal"
                     ? (
                       <SessionTerminalDock
                         sessionId={currentSessionId}
