@@ -7,37 +7,41 @@ const mockHomedir = vi.hoisted(() => {
   return { get: () => dir, set: (d: string) => { dir = d; } };
 });
 
-const mockExecSync = vi.hoisted(() => vi.fn());
+const mockExecFileSync = vi.hoisted(() => vi.fn());
 const mockExistsSync = vi.hoisted(() => vi.fn());
 const mockMkdirSync = vi.hoisted(() => vi.fn());
 
 vi.mock("node:os", () => ({ homedir: () => mockHomedir.get() }));
-vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
+vi.mock("node:child_process", () => ({ execFileSync: mockExecFileSync }));
 vi.mock("node:fs", () => ({
   existsSync: mockExistsSync,
   mkdirSync: mockMkdirSync,
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+// execFileSync is called as execFileSync("git", args[], options).
+// We match on `args` (a string array) joined with spaces to preserve pattern-based test helpers.
 
 function mockGitCommand(pattern: string | RegExp, result: string) {
-  mockExecSync.mockImplementation((cmd: string) => {
+  mockExecFileSync.mockImplementation((_bin: string, args: string[]) => {
+    const cmd = args.join(" ");
     if (typeof pattern === "string" ? cmd.includes(pattern) : pattern.test(cmd)) {
       return result;
     }
-    throw new Error(`Unexpected git command: ${cmd}`);
+    throw new Error(`Unexpected git command: git ${cmd}`);
   });
 }
 
 function mockGitCommands(map: Record<string, string | Error>) {
-  mockExecSync.mockImplementation((cmd: string) => {
+  mockExecFileSync.mockImplementation((_bin: string, args: string[]) => {
+    const cmd = args.join(" ");
     for (const [pattern, result] of Object.entries(map)) {
       if (cmd.includes(pattern)) {
         if (result instanceof Error) throw result;
         return result;
       }
     }
-    throw new Error(`Unmocked git command: ${cmd}`);
+    throw new Error(`Unmocked git command: git ${cmd}`);
   });
 }
 
@@ -47,7 +51,7 @@ let gitUtils: typeof import("./git-utils.js");
 
 beforeEach(async () => {
   vi.resetModules();
-  mockExecSync.mockReset();
+  mockExecFileSync.mockReset();
   mockExistsSync.mockReset();
   mockMkdirSync.mockReset();
   mockHomedir.set("/fake/home");
@@ -58,7 +62,7 @@ beforeEach(async () => {
 
 describe("getRepoInfo", () => {
   it("returns null for a non-git directory", () => {
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       throw new Error("fatal: not a git repository");
     });
 
@@ -98,7 +102,7 @@ describe("getRepoInfo", () => {
   });
 
   it("falls back to 'HEAD' when branch detection fails", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("rev-parse --show-toplevel")) return "/repo";
       if (cmd.includes("rev-parse --abbrev-ref HEAD")) throw new Error("detached HEAD");
       if (cmd.includes("rev-parse --git-dir")) return ".git";
@@ -124,7 +128,7 @@ describe("getRepoInfo", () => {
   });
 
   it("falls back to 'main' when origin HEAD and master are unavailable", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("rev-parse --show-toplevel")) return "/repo";
       if (cmd.includes("rev-parse --abbrev-ref HEAD")) return "feature";
       if (cmd.includes("rev-parse --git-dir")) return ".git";
@@ -138,7 +142,7 @@ describe("getRepoInfo", () => {
   });
 
   it("falls back to 'master' when origin HEAD fails and only master exists", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("rev-parse --show-toplevel")) return "/repo";
       if (cmd.includes("rev-parse --abbrev-ref HEAD")) return "feature";
       if (cmd.includes("rev-parse --git-dir")) return ".git";
@@ -156,7 +160,7 @@ describe("getRepoInfo", () => {
 
 describe("listBranches", () => {
   it("parses local branches with current marker", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return "";
       if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) {
         return "main\t*\nfeat/login\t ";
@@ -179,7 +183,7 @@ describe("listBranches", () => {
   });
 
   it("includes remote-only branches", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return "";
       if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) {
         return "main\t*";
@@ -202,7 +206,7 @@ describe("listBranches", () => {
   });
 
   it("excludes origin/HEAD from remote branches", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return "";
       if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) return "";
       if (cmd.includes("for-each-ref") && cmd.includes("refs/remotes/origin/")) {
@@ -218,7 +222,7 @@ describe("listBranches", () => {
   });
 
   it("includes ahead/behind counts for local branches", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return "";
       if (cmd.includes("for-each-ref") && cmd.includes("refs/heads/")) {
         return "dev\t ";
@@ -237,7 +241,7 @@ describe("listBranches", () => {
   });
 
   it("returns empty array on git failure", () => {
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       throw new Error("git failed");
     });
 
@@ -261,7 +265,7 @@ describe("listWorktrees", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       // isWorktreeDirty calls
       if (cmd.includes("status --porcelain")) return "";
@@ -287,7 +291,7 @@ describe("listWorktrees", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       throw new Error(`Unmocked: ${cmd}`);
@@ -307,7 +311,7 @@ describe("listWorktrees", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       throw new Error(`Unmocked: ${cmd}`);
@@ -319,7 +323,7 @@ describe("listWorktrees", () => {
   });
 
   it("returns empty array on failure", () => {
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       throw new Error("git failed");
     });
 
@@ -343,7 +347,7 @@ describe("ensureWorktree", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       throw new Error(`Unmocked: ${cmd}`);
@@ -356,14 +360,14 @@ describe("ensureWorktree", () => {
     expect(result.actualBranch).toBe("feat/existing");
     expect(result.isNew).toBe(false);
     // Should NOT have called worktree add
-    const addCalls = mockExecSync.mock.calls.filter((c: unknown[]) =>
-      (c[0] as string).includes("worktree add"),
+    const addCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add"),
     );
     expect(addCalls).toHaveLength(0);
   });
 
   it("creates worktree for an existing local branch", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       // listWorktrees
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
@@ -383,16 +387,16 @@ describe("ensureWorktree", () => {
     expect(result.actualBranch).toBe("feat/local");
     expect(result.isNew).toBe(false);
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add"),
     );
     expect(addCall).toBeDefined();
     // Should NOT have -b flag for existing branch
-    expect((addCall![0] as string)).not.toContain("-b ");
+    expect((addCall![1] as string[]).join(" ")).not.toContain("-b ");
   });
 
   it("creates tracking branch from remote", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
@@ -414,18 +418,18 @@ describe("ensureWorktree", () => {
     expect(result.actualBranch).toBe("feat/remote");
     expect(result.isNew).toBe(false);
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toContain("origin/feat/remote");
+    expect((addCall![1] as string[]).join(" ")).toContain("origin/feat/remote");
   });
 
   it("creates new branch from origin/base when branch does not exist anywhere", () => {
     // When neither the requested branch nor its remote counterpart exist,
     // but origin/{baseBranch} is available (after fetch), use origin/{baseBranch}
     // as the start point instead of the potentially stale local ref.
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
@@ -447,18 +451,18 @@ describe("ensureWorktree", () => {
     expect(result.branch).toBe("feat/new");
     expect(result.actualBranch).toBe("feat/new");
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
     // Should use origin/develop (remote ref), NOT local develop
-    expect((addCall![0] as string)).toContain("origin/develop");
+    expect((addCall![1] as string[]).join(" ")).toContain("origin/develop");
   });
 
   it("falls back to local base branch when origin ref does not exist", () => {
     // When origin/{baseBranch} is not available (e.g. no remote), fall back
     // to the local base branch ref.
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
@@ -475,17 +479,17 @@ describe("ensureWorktree", () => {
     const result = gitUtils.ensureWorktree("/repo", "feat/new", { baseBranch: "develop" });
     expect(result.isNew).toBe(true);
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
     // Should fall back to local "develop" since origin/develop doesn't exist
-    expect((addCall![0] as string)).toContain("develop");
-    expect((addCall![0] as string)).not.toContain("origin/develop");
+    expect((addCall![1] as string[]).join(" ")).toContain("develop");
+    expect((addCall![1] as string[]).join(" ")).not.toContain("origin/develop");
   });
 
   it("throws when createBranch=false and branch does not exist", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
@@ -502,7 +506,7 @@ describe("ensureWorktree", () => {
   });
 
   it("calls mkdirSync with recursive option when creating worktree", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
@@ -531,7 +535,7 @@ describe("ensureWorktree", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       if (cmd.includes("rev-parse HEAD")) return "abc123";
@@ -550,16 +554,16 @@ describe("ensureWorktree", () => {
     expect(result.branch).toBe("main");
     expect(result.actualBranch).toMatch(/^main-wt-\d{4}$/);
     // Should create a branch-tracking worktree
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toMatch(/main-wt-\d{4}/);
-    expect((addCall![0] as string)).toContain("abc123");
+    expect((addCall![1] as string[]).join(" ")).toMatch(/main-wt-\d{4}/);
+    expect((addCall![1] as string[]).join(" ")).toContain("abc123");
   });
 
   it("creates unique paths with random suffix when base path exists", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) {
         return "worktree /repo\nHEAD abc\nbranch refs/heads/main\n";
       }
@@ -591,7 +595,7 @@ describe("ensureWorktree", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       if (cmd.includes("rev-parse HEAD")) return "def456";
@@ -608,11 +612,11 @@ describe("ensureWorktree", () => {
     expect(result.branch).toBe("feat/existing");
     expect(result.actualBranch).toMatch(/^feat\/existing-wt-\d{4}$/);
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toMatch(/feat\/existing-wt-\d{4}/);
+    expect((addCall![1] as string[]).join(" ")).toMatch(/feat\/existing-wt-\d{4}/);
   });
 
   it("generates unique branch when forceNew=true and branch exists locally but no worktree uses it", () => {
@@ -624,13 +628,13 @@ describe("ensureWorktree", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       // "main" exists as a local branch
       if (cmd.includes("rev-parse --verify refs/heads/main") && !cmd.includes("-wt-")) return "aaa111";
-      // rev-parse for the commit hash (git() uses cwd, not -C)
-      if (cmd === "git rev-parse refs/heads/main") return "aaa111";
+      // rev-parse for the commit hash (without --verify flag)
+      if (cmd === "rev-parse refs/heads/main") return "aaa111";
       // generateUniqueWorktreeBranch checks (random suffix)
       if (/rev-parse --verify refs\/heads\/main-wt-\d{4}/.test(cmd)) throw new Error("not found");
       if (cmd.includes("worktree add -b")) return "";
@@ -644,11 +648,11 @@ describe("ensureWorktree", () => {
     // Should get a unique branch, NOT the raw "main" branch
     expect(result.actualBranch).toMatch(/^main-wt-\d{4}$/);
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toMatch(/main-wt-\d{4}/);
+    expect((addCall![1] as string[]).join(" ")).toMatch(/main-wt-\d{4}/);
   });
 
   it("generates unique branch when forceNew=true and only remote branch exists", () => {
@@ -660,7 +664,7 @@ describe("ensureWorktree", () => {
       "",
     ].join("\n");
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("worktree list --porcelain")) return porcelain;
       if (cmd.includes("status --porcelain")) return "";
       // "main" does NOT exist locally
@@ -678,12 +682,12 @@ describe("ensureWorktree", () => {
     expect(result.branch).toBe("main");
     expect(result.actualBranch).toMatch(/^main-wt-\d{4}$/);
 
-    const addCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("worktree add -b"),
+    const addCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree add -b"),
     );
     expect(addCall).toBeDefined();
-    expect((addCall![0] as string)).toMatch(/main-wt-\d{4}/);
-    expect((addCall![0] as string)).toContain("origin/main");
+    expect((addCall![1] as string[]).join(" ")).toMatch(/main-wt-\d{4}/);
+    expect((addCall![1] as string[]).join(" ")).toContain("origin/main");
   });
 });
 
@@ -691,7 +695,7 @@ describe("ensureWorktree", () => {
 
 describe("generateUniqueWorktreeBranch", () => {
   it("returns branch-wt-{random4digit} when no suffixed branches exist", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("rev-parse --verify refs/heads/main-wt-")) throw new Error("not found");
       throw new Error(`Unmocked: ${cmd}`);
     });
@@ -707,7 +711,7 @@ describe("generateUniqueWorktreeBranch", () => {
     let callIdx = 0;
     Math.random = () => randomValues[callIdx++] ?? origRandom();
 
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       // First candidate (5500) already exists
       if (cmd.includes("rev-parse --verify refs/heads/feat/x-wt-5500")) return "abc";
       // Second candidate (7300) is free
@@ -733,8 +737,8 @@ describe("removeWorktree", () => {
     expect(result.removed).toBe(true);
     expect(result.reason).toBeUndefined();
 
-    const pruneCalls = mockExecSync.mock.calls.filter((c: unknown[]) =>
-      (c[0] as string).includes("worktree prune"),
+    const pruneCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("worktree prune"),
     );
     expect(pruneCalls).toHaveLength(1);
   });
@@ -749,15 +753,15 @@ describe("removeWorktree", () => {
     const result = gitUtils.removeWorktree("/repo", "/gone/path", { branchToDelete: "main-wt-2" });
     expect(result.removed).toBe(true);
 
-    const branchDeleteCalls = mockExecSync.mock.calls.filter((c: unknown[]) =>
-      (c[0] as string).includes("branch -D main-wt-2"),
+    const branchDeleteCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("branch -D main-wt-2"),
     );
     expect(branchDeleteCalls).toHaveLength(1);
   });
 
   it("deletes branchToDelete after successful worktree removal", () => {
     mockExistsSync.mockReturnValue(true);
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("status --porcelain")) return "";
       if (cmd.includes("worktree remove")) return "";
       if (cmd.includes("branch -D feat-wt-3")) return "";
@@ -767,8 +771,8 @@ describe("removeWorktree", () => {
     const result = gitUtils.removeWorktree("/repo", "/wt/path", { branchToDelete: "feat-wt-3" });
     expect(result.removed).toBe(true);
 
-    const branchDeleteCalls = mockExecSync.mock.calls.filter((c: unknown[]) =>
-      (c[0] as string).includes("branch -D feat-wt-3"),
+    const branchDeleteCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("branch -D feat-wt-3"),
     );
     expect(branchDeleteCalls).toHaveLength(1);
   });
@@ -785,7 +789,7 @@ describe("removeWorktree", () => {
   it("force-removes dirty worktree", () => {
     // existsSync: first call for removeWorktree check, second for isWorktreeDirty
     mockExistsSync.mockReturnValue(true);
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("status --porcelain")) return " M dirty.ts";
       if (cmd.includes("worktree remove") && cmd.includes("--force")) return "";
       throw new Error(`Unmocked: ${cmd}`);
@@ -797,7 +801,7 @@ describe("removeWorktree", () => {
 
   it("returns reason on error during removal", () => {
     mockExistsSync.mockReturnValue(true);
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("status --porcelain")) return "";
       if (cmd.includes("worktree remove"))
         throw new Error("worktree is locked");
@@ -847,7 +851,7 @@ describe("getBranchStatus", () => {
   });
 
   it("returns 0/0 when there is no upstream", () => {
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       throw new Error("no upstream configured");
     });
 
@@ -877,7 +881,7 @@ describe("checkoutOrCreateBranch", () => {
 
   it("creates branch from origin/defaultBranch when checkout fails and createBranch=true", () => {
     // Checkout fails (branch doesn't exist), but origin/main is available
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("checkout feat/new") && !cmd.includes("-b"))
         throw new Error("error: pathspec 'feat/new' did not match any file(s) known to git");
       if (cmd.includes("rev-parse --verify refs/remotes/origin/main")) return "abc123";
@@ -892,16 +896,16 @@ describe("checkoutOrCreateBranch", () => {
     expect(result.created).toBe(true);
 
     // Verify the correct git command was called
-    const createCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("checkout -b"),
+    const createCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("checkout -b"),
     );
     expect(createCall).toBeDefined();
-    expect((createCall![0] as string)).toContain("origin/main");
+    expect((createCall![1] as string[]).join(" ")).toContain("origin/main");
   });
 
   it("falls back to local defaultBranch when origin ref does not exist", () => {
     // Checkout fails, and origin/main is not available either
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("checkout feat/new") && !cmd.includes("-b"))
         throw new Error("error: pathspec 'feat/new' did not match any file(s) known to git");
       if (cmd.includes("rev-parse --verify refs/remotes/origin/main"))
@@ -916,16 +920,16 @@ describe("checkoutOrCreateBranch", () => {
     });
     expect(result.created).toBe(true);
 
-    const createCall = mockExecSync.mock.calls.find((c: unknown[]) =>
-      (c[0] as string).includes("checkout -b"),
+    const createCall = mockExecFileSync.mock.calls.find((c: unknown[]) =>
+      (c[1] as string[]).join(" ").includes("checkout -b"),
     );
     expect(createCall).toBeDefined();
-    expect((createCall![0] as string)).toContain("main");
-    expect((createCall![0] as string)).not.toContain("origin/main");
+    expect((createCall![1] as string[]).join(" ")).toContain("main");
+    expect((createCall![1] as string[]).join(" ")).not.toContain("origin/main");
   });
 
   it("throws when branch does not exist and createBranch is not set", () => {
-    mockExecSync.mockImplementation((cmd: string) => {
+    mockExecFileSync.mockImplementation((_bin: string, args: string[]) => { const cmd = args.join(" ");
       if (cmd.includes("checkout feat/missing"))
         throw new Error("error: pathspec 'feat/missing' did not match any file(s) known to git");
       throw new Error(`Unmocked: ${cmd}`);

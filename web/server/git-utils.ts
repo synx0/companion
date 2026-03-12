@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
@@ -53,8 +53,8 @@ function worktreeDir(repoName: string, branch: string): string {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function git(cmd: string, cwd: string): string {
-  return execSync(`git ${cmd}`, {
+function git(args: string[], cwd: string): string {
+  return execFileSync("git", args, {
     cwd,
     encoding: "utf-8",
     timeout: 10_000,
@@ -62,9 +62,9 @@ function git(cmd: string, cwd: string): string {
   }).trim();
 }
 
-function gitSafe(cmd: string, cwd: string): string | null {
+function gitSafe(args: string[], cwd: string): string | null {
   try {
-    return git(cmd, cwd);
+    return git(args, cwd);
   } catch {
     return null;
   }
@@ -73,11 +73,11 @@ function gitSafe(cmd: string, cwd: string): string | null {
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 export function getRepoInfo(cwd: string): GitRepoInfo | null {
-  const repoRoot = gitSafe("rev-parse --show-toplevel", cwd);
+  const repoRoot = gitSafe(["rev-parse", "--show-toplevel"], cwd);
   if (!repoRoot) return null;
 
-  const currentBranch = gitSafe("rev-parse --abbrev-ref HEAD", cwd) || "HEAD";
-  const gitDir = gitSafe("rev-parse --git-dir", cwd) || "";
+  const currentBranch = gitSafe(["rev-parse", "--abbrev-ref", "HEAD"], cwd) || "HEAD";
+  const gitDir = gitSafe(["rev-parse", "--git-dir"], cwd) || "";
   // A linked worktree's .git dir is inside the main repo's .git/worktrees/
   const isWorktree = gitDir.includes("/worktrees/");
 
@@ -94,12 +94,12 @@ export function getRepoInfo(cwd: string): GitRepoInfo | null {
 
 function resolveDefaultBranch(repoRoot: string): string {
   // Try origin HEAD
-  const originRef = gitSafe("symbolic-ref refs/remotes/origin/HEAD", repoRoot);
+  const originRef = gitSafe(["symbolic-ref", "refs/remotes/origin/HEAD"], repoRoot);
   if (originRef) {
     return originRef.replace("refs/remotes/origin/", "");
   }
   // Fallback: check if main or master exists
-  const branches = gitSafe("branch --list main master", repoRoot) || "";
+  const branches = gitSafe(["branch", "--list", "main", "master"], repoRoot) || "";
   if (branches.includes("main")) return "main";
   if (branches.includes("master")) return "master";
   // Last resort
@@ -118,7 +118,7 @@ export function listBranches(repoRoot: string): GitBranchInfo[] {
 
   // Local branches
   const localRaw = gitSafe(
-    "for-each-ref '--format=%(refname:short)%09%(HEAD)' refs/heads/",
+    ["for-each-ref", "--format=%(refname:short)%09%(HEAD)", "refs/heads/"],
     repoRoot,
   );
   if (localRaw) {
@@ -141,7 +141,7 @@ export function listBranches(repoRoot: string): GitBranchInfo[] {
   // Remote branches (only those without a local counterpart)
   const localNames = new Set(result.map((b) => b.name));
   const remoteRaw = gitSafe(
-    "for-each-ref '--format=%(refname:short)' refs/remotes/origin/",
+    ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/"],
     repoRoot,
   );
   if (remoteRaw) {
@@ -165,7 +165,7 @@ export function listBranches(repoRoot: string): GitBranchInfo[] {
 }
 
 export function listWorktrees(repoRoot: string): GitWorktreeInfo[] {
-  const raw = gitSafe("worktree list --porcelain", repoRoot);
+  const raw = gitSafe(["worktree", "list", "--porcelain"], repoRoot);
   if (!raw) return [];
 
   const worktrees: GitWorktreeInfo[] = [];
@@ -239,39 +239,39 @@ export function ensureWorktree(
   // A worktree already exists for this branch — create a new uniquely-named
   // branch so multiple sessions can work on the same branch independently.
   if (found) {
-    const commitHash = git("rev-parse HEAD", found.path);
+    const commitHash = git(["rev-parse", "HEAD"], found.path);
     const uniqueBranch = generateUniqueWorktreeBranch(repoRoot, branchName);
-    git(`worktree add -b ${uniqueBranch} "${targetPath}" ${commitHash}`, repoRoot);
+    git(["worktree", "add", "-b", uniqueBranch, targetPath, commitHash], repoRoot);
     return { worktreePath: targetPath, branch: branchName, actualBranch: uniqueBranch, isNew: false };
   }
 
   // Check if branch already exists locally or on remote
   const branchExists =
-    gitSafe(`rev-parse --verify refs/heads/${branchName}`, repoRoot) !== null;
+    gitSafe(["rev-parse", "--verify", `refs/heads/${branchName}`], repoRoot) !== null;
   const remoteBranchExists =
-    gitSafe(`rev-parse --verify refs/remotes/origin/${branchName}`, repoRoot) !== null;
+    gitSafe(["rev-parse", "--verify", `refs/remotes/origin/${branchName}`], repoRoot) !== null;
 
   if (branchExists) {
     if (options?.forceNew) {
       // Create a uniquely-named branch so multiple sessions can work independently
-      const commitHash = git(`rev-parse refs/heads/${branchName}`, repoRoot);
+      const commitHash = git(["rev-parse", `refs/heads/${branchName}`], repoRoot);
       const uniqueBranch = generateUniqueWorktreeBranch(repoRoot, branchName);
-      git(`worktree add -b ${uniqueBranch} "${targetPath}" ${commitHash}`, repoRoot);
+      git(["worktree", "add", "-b", uniqueBranch, targetPath, commitHash], repoRoot);
       return { worktreePath: targetPath, branch: branchName, actualBranch: uniqueBranch, isNew: false };
     }
     // Worktree add with existing local branch
-    git(`worktree add "${targetPath}" ${branchName}`, repoRoot);
+    git(["worktree", "add", targetPath, branchName], repoRoot);
     return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: false };
   }
 
   if (remoteBranchExists) {
     if (options?.forceNew) {
       const uniqueBranch = generateUniqueWorktreeBranch(repoRoot, branchName);
-      git(`worktree add -b ${uniqueBranch} "${targetPath}" origin/${branchName}`, repoRoot);
+      git(["worktree", "add", "-b", uniqueBranch, targetPath, `origin/${branchName}`], repoRoot);
       return { worktreePath: targetPath, branch: branchName, actualBranch: uniqueBranch, isNew: false };
     }
     // Create local tracking branch from remote
-    git(`worktree add -b ${branchName} "${targetPath}" origin/${branchName}`, repoRoot);
+    git(["worktree", "add", "-b", branchName, targetPath, `origin/${branchName}`], repoRoot);
     return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: false };
   }
 
@@ -281,10 +281,10 @@ export function ensureWorktree(
     const base = options?.baseBranch || resolveDefaultBranch(repoRoot);
     const remoteRef = `origin/${base}`;
     const startPoint =
-      gitSafe(`rev-parse --verify refs/remotes/${remoteRef}`, repoRoot) !== null
+      gitSafe(["rev-parse", "--verify", `refs/remotes/${remoteRef}`], repoRoot) !== null
         ? remoteRef
         : base;
-    git(`worktree add -b ${branchName} "${targetPath}" ${startPoint}`, repoRoot);
+    git(["worktree", "add", "-b", branchName, targetPath, startPoint], repoRoot);
     return { worktreePath: targetPath, branch: branchName, actualBranch: branchName, isNew: true };
   }
 
@@ -300,7 +300,7 @@ export function generateUniqueWorktreeBranch(repoRoot: string, baseBranch: strin
   for (let attempt = 0; attempt < 100; attempt++) {
     const suffix = Math.floor(1000 + Math.random() * 9000);
     const candidate = `${baseBranch}-wt-${suffix}`;
-    if (gitSafe(`rev-parse --verify refs/heads/${candidate}`, repoRoot) === null) {
+    if (gitSafe(["rev-parse", "--verify", `refs/heads/${candidate}`], repoRoot) === null) {
       return candidate;
     }
   }
@@ -315,9 +315,9 @@ export function removeWorktree(
 ): { removed: boolean; reason?: string } {
   if (!existsSync(worktreePath)) {
     // Already gone, clean up git's reference
-    gitSafe("worktree prune", repoRoot);
+    gitSafe(["worktree", "prune"], repoRoot);
     if (options?.branchToDelete) {
-      gitSafe(`branch -D ${options.branchToDelete}`, repoRoot);
+      gitSafe(["branch", "-D", options.branchToDelete], repoRoot);
     }
     return { removed: true };
   }
@@ -330,11 +330,13 @@ export function removeWorktree(
   }
 
   try {
-    const forceFlag = options?.force ? " --force" : "";
-    git(`worktree remove "${worktreePath}"${forceFlag}`, repoRoot);
+    const removeArgs = options?.force
+      ? ["worktree", "remove", "--force", worktreePath]
+      : ["worktree", "remove", worktreePath];
+    git(removeArgs, repoRoot);
     // Clean up the companion-managed branch after worktree removal
     if (options?.branchToDelete) {
-      gitSafe(`branch -D ${options.branchToDelete}`, repoRoot);
+      gitSafe(["branch", "-D", options.branchToDelete], repoRoot);
     }
     return { removed: true };
   } catch (e: unknown) {
@@ -347,13 +349,13 @@ export function removeWorktree(
 
 export function isWorktreeDirty(worktreePath: string): boolean {
   if (!existsSync(worktreePath)) return false;
-  const status = gitSafe("status --porcelain", worktreePath);
+  const status = gitSafe(["status", "--porcelain"], worktreePath);
   return status !== null && status.length > 0;
 }
 
 export function gitFetch(cwd: string): { success: boolean; output: string } {
   try {
-    const output = git("fetch --prune", cwd);
+    const output = git(["fetch", "--prune"], cwd);
     return { success: true, output };
   } catch (e: unknown) {
     return { success: false, output: e instanceof Error ? e.message : String(e) };
@@ -364,7 +366,7 @@ export function gitPull(
   cwd: string,
 ): { success: boolean; output: string } {
   try {
-    const output = git("pull", cwd);
+    const output = git(["pull"], cwd);
     return { success: true, output };
   } catch (e: unknown) {
     return { success: false, output: e instanceof Error ? e.message : String(e) };
@@ -373,7 +375,7 @@ export function gitPull(
 
 
 export function checkoutBranch(cwd: string, branchName: string): void {
-  git(`checkout ${branchName}`, cwd);
+  git(["checkout", branchName], cwd);
 }
 
 /**
@@ -386,7 +388,7 @@ export function checkoutOrCreateBranch(
   options?: { createBranch?: boolean; defaultBranch?: string },
 ): { created: boolean } {
   // Try regular checkout first (works for existing local and remote-tracking branches)
-  const checkoutResult = gitSafe(`checkout ${branchName}`, cwd);
+  const checkoutResult = gitSafe(["checkout", branchName], cwd);
   if (checkoutResult !== null) {
     return { created: false };
   }
@@ -400,10 +402,10 @@ export function checkoutOrCreateBranch(
   // Prefer remote ref (up-to-date after fetch) over potentially stale local ref
   const remoteRef = `origin/${base}`;
   const startPoint =
-    gitSafe(`rev-parse --verify refs/remotes/${remoteRef}`, cwd) !== null
+    gitSafe(["rev-parse", "--verify", `refs/remotes/${remoteRef}`], cwd) !== null
       ? remoteRef
       : base;
-  git(`checkout -b ${branchName} ${startPoint}`, cwd);
+  git(["checkout", "-b", branchName, startPoint], cwd);
   return { created: true };
 }
 
@@ -412,7 +414,7 @@ export function getBranchStatus(
   branchName: string,
 ): { ahead: number; behind: number } {
   const raw = gitSafe(
-    `rev-list --left-right --count origin/${branchName}...${branchName}`,
+    ["rev-list", "--left-right", "--count", `origin/${branchName}...${branchName}`],
     repoRoot,
   );
   if (!raw) return { ahead: 0, behind: 0 };
